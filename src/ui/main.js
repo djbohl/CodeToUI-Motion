@@ -320,6 +320,15 @@ function renderAudioInspector(body, a) {
   te.onchange = () => { a.trimEnd = te.value === "" ? null : Math.max(0, Number(te.value) || 0); markAudioDirty(); };
   body.appendChild(field("Trim end (ms)", te));
 
+  // Snap the track's end to the video's end (plays from its start to the last clip).
+  body.appendChild(mkBtn("Fit to video length", () => {
+    const len = Math.max(200, totalMs() - a.start);
+    let end = a.trimStart + len;
+    if (a.dur != null) end = Math.min(end, a.dur);
+    a.trimEnd = end;
+    renderInspector(); markAudioDirty();
+  }));
+
   body.appendChild(mkBtn("Remove track", () => {
     state.demo.audio = state.demo.audio.filter((x) => x !== a);
     state.selectedAudioId = null;
