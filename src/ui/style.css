@@ -198,17 +198,29 @@ body {
 
 /* Timeline */
 .timeline {
-  height: 196px; flex-shrink: 0; border-top: 2px solid var(--border);
+  height: 252px; flex-shrink: 0; border-top: 2px solid var(--border);
   background: var(--surface); padding: 8px 12px 12px; display: flex; flex-direction: column;
 }
-.timeline-head { display: flex; align-items: baseline; gap: 12px; }
+.timeline-head { display: flex; align-items: center; gap: 12px; }
+.timeline-spacer { flex: 1; }
 .timeline-scroll { position: relative; flex: 1; overflow-x: auto; overflow-y: hidden; margin-top: 8px; }
 .ruler { position: relative; height: 18px; }
 .ruler .tick {
   position: absolute; top: 0; font-size: 9px; color: var(--muted);
   border-left: 1px solid var(--border); padding-left: 3px; height: 100%;
 }
-.track { position: relative; height: 96px; margin-top: 4px; }
+.track { position: relative; height: 92px; margin-top: 4px; }
+.audio-track { position: relative; height: 48px; margin-top: 6px; }
+.audio-clip {
+  position: absolute; top: 0; height: 48px; padding: 6px 8px; overflow: hidden;
+  border: 2px solid var(--border); box-shadow: 2px 2px 0 var(--shadow);
+  cursor: grab; user-select: none; display: flex; flex-direction: column; gap: 3px;
+}
+.audio-clip.music { background: color-mix(in srgb, var(--accent-2) 22%, var(--surface-2)); }
+.audio-clip.voice { background: color-mix(in srgb, var(--accent) 22%, var(--surface-2)); }
+.audio-clip.selected { border-color: var(--accent); }
+.audio-clip .clip-label { font-size: 11px; color: var(--text); }
+.audio-clip .clip-sub { font-size: 9px; color: var(--muted); }
 .clip {
   position: absolute; top: 0; height: 96px;
   background: var(--surface-2); border: 2px solid var(--border);

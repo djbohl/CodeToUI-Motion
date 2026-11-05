@@ -99,3 +99,22 @@ test("buildFfmpegArgs emits correct flags per format", () => {
   assert.ok(webm.includes("libvpx-vp9"));
   assert.ok(webm.includes("24"));
 });
+
+test("buildFfmpegArgs muxes audio tracks (adelay/volume/amix)", () => {
+  const args = buildFfmpegArgs({
+    framesDir: "/f", fps: 30, format: "mp4", outPath: "/o.mp4",
+    audio: [
+      { path: "/a/music.mp3", start: 500, volume: 0.6, trimStart: 1000, trimEnd: 4000 },
+      { path: "/a/vo.mp3", start: 0, volume: 1, trimStart: 0, trimEnd: null },
+    ],
+  });
+  const s = args.join(" ");
+  assert.ok(args.includes("/a/music.mp3") && args.includes("/a/vo.mp3"));
+  assert.ok(s.includes("-ss 1")); // trimStart 1000ms -> 1s
+  assert.ok(s.includes("adelay=500|500"));
+  assert.ok(s.includes("volume=0.6"));
+  assert.ok(s.includes("amix=inputs=2"));
+  assert.ok(args.includes("-c:a") && args.includes("aac"));
+  assert.ok(args.includes("-shortest"));
+  assert.ok(s.includes("[v]") && s.includes("[aout]")); // mapped via filter_complex
+});

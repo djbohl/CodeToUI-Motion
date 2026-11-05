@@ -94,7 +94,25 @@ export function normalizeDemo(demo) {
     else clip.overrides = (c.overrides || []).map(normalizeOverride).filter((o) => o.elementId);
     return clip;
   });
-  return { version: 1, fps, size, clips, audio: demo?.audio || [] };
+  const audio = (demo?.audio || []).map(normalizeAudio).filter((a) => a.src);
+  return { version: 1, fps, size, clips, audio };
+}
+
+// An audio track on the timeline (background music or voiceover). `src` is a project-
+// relative path (under proto.assets/); `start` offsets it on the timeline; trim selects a
+// window of the source; `dur` is the source length (ms), cached by the editor for layout.
+export function normalizeAudio(a) {
+  return {
+    id: a.id || "a" + Math.random().toString(36).slice(2, 8),
+    kind: a.kind === "voice" ? "voice" : "music",
+    src: typeof a.src === "string" ? a.src : "",
+    name: typeof a.name === "string" ? a.name : "",
+    start: Math.max(0, num(a.start, 0)),
+    volume: Math.min(1, Math.max(0, num(a.volume, 1))),
+    trimStart: Math.max(0, num(a.trimStart, 0)),
+    trimEnd: a.trimEnd != null && Number.isFinite(Number(a.trimEnd)) ? Math.max(0, Number(a.trimEnd)) : null,
+    dur: a.dur != null ? Math.max(0, num(a.dur, 0)) : null,
+  };
 }
 
 export const ANIM_PRESETS = ["none", "pop", "fade", "scale", "slide-up", "slide-down", "slide-left", "slide-right"];
@@ -172,6 +190,10 @@ export function validateDemo(demo, model) {
       if (typeof el.elementId !== "string" || !el.elementId) throw new Error(`${at} element ${j}: needs an elementId.`);
       if (!CANVAS_KINDS.includes(el.kind)) throw new Error(`${at} element ${j}: kind must be text or box.`);
     });
+  });
+  (demo.audio || []).forEach((a, i) => {
+    if (!["music", "voice"].includes(a.kind)) throw new Error(`audio ${i}: kind must be music or voice.`);
+    if (typeof a.src !== "string" || !a.src) throw new Error(`audio ${i}: needs a src.`);
   });
   return { warnings };
 }

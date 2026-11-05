@@ -17,6 +17,7 @@ const RUNTIME = `
   var frontClip=null, backClip=null;
   var total=0, _t=0, _playing=false, _raf=null, _last=0;
   var pickOn=false;
+  var audioEls={}; // id -> { el:HTMLAudioElement, track, url }
 
   (function(){ var t=0; CLIPS.forEach(function(c){ c._start=t; t+=c.duration; c._end=t; }); total=t; })();
 
@@ -173,6 +174,32 @@ const RUNTIME = `
       // Re-apply overrides at the current time WITHOUT remounting (the editor shares the
       // same clip objects by reference, so mutating x/y/scale/anim shows up immediately).
       refresh:function(){ applyAt(_t); },
+      // Audio preview: tracks = [{id,url,start,volume,trimStart,trimEnd}]. Reuses existing
+      // <audio> elements by url so edits don't re-fetch.
+      setAudio:function(tracks){
+        var next={};
+        (tracks||[]).forEach(function(t){
+          var o=audioEls[t.id];
+          if(o && o.url===t.url){ o.track=t; next[t.id]=o; }
+          else { if(o) o.el.pause(); var a=new Audio(t.url); a.preload='auto'; next[t.id]={el:a,track:t,url:t.url}; }
+        });
+        Object.keys(audioEls).forEach(function(k){ if(!next[k]) audioEls[k].el.pause(); });
+        audioEls=next;
+      },
+      // Called every frame by the editor; only toggles play/pause at window boundaries so
+      // it doesn't thrash currentTime mid-play.
+      audioTick:function(t, playing){
+        Object.keys(audioEls).forEach(function(k){
+          var o=audioEls[k], tr=o.track, a=o.el;
+          var local=t - tr.start;
+          var srcLen = (a.duration && isFinite(a.duration)) ? a.duration*1000 : 1e9;
+          var winLen = tr.trimEnd!=null ? (tr.trimEnd - tr.trimStart) : (srcLen - tr.trimStart);
+          var inWin = local>=0 && local < winLen;
+          a.volume = tr.volume!=null ? tr.volume : 1;
+          if(playing && inWin){ if(a.paused){ try{ a.currentTime=(tr.trimStart+local)/1000; }catch(e){} var p=a.play(); if(p&&p.catch) p.catch(function(){}); } }
+          else if(!a.paused){ a.pause(); }
+        });
+      },
       setPick:function(on){ pickOn=!!on; try{ if(front&&front.contentDocument&&front.contentDocument.body) front.contentDocument.body.style.cursor = pickOn?'crosshair':''; }catch(e){} },
       // Bounding box of an element in stage coordinates (the front iframe fills the
       // stage at 0,0), so the editor can draw a selection overlay over it.

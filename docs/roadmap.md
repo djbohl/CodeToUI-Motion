@@ -42,10 +42,13 @@ with a custom-code escape hatch (the "simple code" throughline).
   with its styling — is deferred as a stretch; animating it in place on a screen clip
   already covers the main case.)
 
-## M3 — audio ⬜
+## M3 — audio ✅
 
-- ⬜ Timeline audio lane(s); import background music + voiceover; per-track start /
-  volume / trim. `encode.js` muxes with ffmpeg (`-c:a aac -shortest`).
+- ✅ Timeline audio lane; import background music + voiceover (saved under the project's
+  `proto.assets/`); per-track start / volume / trim; drag on the lane to move start.
+  Preview plays the audio synced to the editor clock (`setAudio`/`audioTick`); export
+  muxes via ffmpeg filter_complex (adelay + volume + amix, `-c:a aac`/`libopus`,
+  `-shortest`). Backend `POST /api/audio` + `GET /api/asset`.
 - ⬜ (stretch) record voiceover in-app (MediaRecorder).
 
 ## Later / stretch

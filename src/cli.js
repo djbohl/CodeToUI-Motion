@@ -90,10 +90,17 @@ async function cmdRender(input, values) {
   const out = values.out || path.resolve(`${inputStem(input)}.${format}`);
   const framesDir = await mkdtemp(path.join(tmpdir(), "c2p-frames-"));
   console.log(`Capturing ${demo.clips.length} clips @ ${demo.fps}fps …`);
+  // Resolve audio tracks relative to the input (project folder, or the .html's dir).
+  const base = (await fileExists(path.resolve(input))) && !path.extname(input) ? path.resolve(input) : path.dirname(path.resolve(input));
+  const audio = [];
+  for (const a of demo.audio || []) {
+    const p = path.resolve(base, a.src);
+    if (await fileExists(p)) audio.push({ path: p, start: a.start, volume: a.volume, trimStart: a.trimStart, trimEnd: a.trimEnd });
+  }
   try {
     const manifest = await captureDemo(model, demo, { framesDir, fps: demo.fps, format, scale: num(values.scale, 2) });
     console.log(`Captured ${manifest.frameCount} frames. Encoding → ${out}`);
-    await encode(manifest, out);
+    await encode(manifest, out, audio);
     console.log(`Done: ${out}`);
   } finally {
     if (!values["keep-frames"]) await rm(framesDir, { recursive: true, force: true });

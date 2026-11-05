@@ -22,6 +22,7 @@ const state = {
   demo: { version: 1, fps: 30, size: { width: 390, height: 844 }, clips: [], audio: [] },
   selectedId: null,
   selectedElementId: null,
+  selectedAudioId: null,
 };
 
 // --- REST -------------------------------------------------------------------
@@ -55,6 +56,14 @@ function whenRendererReady() {
 function pushToRenderer() {
   const r = renderer();
   if (r) r.load(state.demo.clips, state.demo.size);
+}
+function pushAudioToRenderer() {
+  const r = renderer();
+  if (!r || !r.setAudio) return;
+  r.setAudio((state.demo.audio || []).map((a) => ({
+    id: a.id, url: "/api/asset?src=" + encodeURIComponent(a.src),
+    start: a.start, volume: a.volume, trimStart: a.trimStart, trimEnd: a.trimEnd,
+  })));
 }
 async function reloadPreview() {
   $("#preview").src = "/api/preview?t=" + Date.now();
@@ -216,14 +225,109 @@ function renderTimeline() {
     track.appendChild(el);
     x += w;
   }
+  renderAudioLane();
+}
+function audioLen(a) {
+  const src = a.trimEnd != null ? a.trimEnd : a.dur != null ? a.dur : 3000;
+  return Math.max(200, src - a.trimStart);
+}
+function renderAudioLane() {
+  const lane = $("#audio-track");
+  lane.style.width = $("#ruler").style.width;
+  lane.innerHTML = "";
+  for (const a of state.demo.audio || []) {
+    const el = document.createElement("div");
+    el.className = `audio-clip ${a.kind}` + (a.id === state.selectedAudioId ? " selected" : "");
+    el.style.left = (a.start / 1000) * PPS + "px";
+    el.style.width = (audioLen(a) / 1000) * PPS + "px";
+    el.dataset.audioId = a.id;
+    el.innerHTML = `<span class="clip-label">${a.kind === "voice" ? "🎙" : "♪"} ${a.name || a.kind}</span><span class="clip-sub">${(audioLen(a) / 1000).toFixed(1)}s · vol ${Math.round((a.volume ?? 1) * 100)}%</span>`;
+    lane.appendChild(el);
+  }
+}
+function selectedAudio() {
+  return (state.demo.audio || []).find((a) => a.id === state.selectedAudioId) || null;
+}
+function selectAudio(id) {
+  state.selectedAudioId = id;
+  renderInspector();
+  renderTimeline();
+}
+// Audio edits: update the renderer's tracks + redraw the lane, then autosave.
+function markAudioDirty() {
+  pushAudioToRenderer();
+  renderTimeline();
+  scheduleSave();
+}
+let pendingAudioKind = "music";
+function importAudio(kind) { pendingAudioKind = kind; $("#audio-file").click(); }
+function readAudioDuration(file) {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const au = new Audio();
+    au.preload = "metadata";
+    au.onloadedmetadata = () => { resolve(isFinite(au.duration) ? Math.round(au.duration * 1000) : null); URL.revokeObjectURL(url); };
+    au.onerror = () => { resolve(null); URL.revokeObjectURL(url); };
+    au.src = url;
+  });
+}
+async function uploadAudio(file, kind) {
+  try {
+    setStatus(`Importing ${file.name}…`);
+    const dur = await readAudioDuration(file);
+    const res = await fetch(`/api/audio?name=${encodeURIComponent(file.name)}&kind=${kind}`, { method: "POST", body: file });
+    if (!res.ok) throw new Error((res.headers.get("content-type") || "").includes("json") ? (await res.json()).error : res.statusText);
+    const { src, name } = await res.json();
+    const a = { id: "a" + Math.random().toString(36).slice(2, 8), kind, src, name, start: Math.round(playT), volume: 1, trimStart: 0, trimEnd: null, dur };
+    (state.demo.audio ||= []).push(a);
+    state.selectedAudioId = a.id;
+    renderInspector();
+    markAudioDirty();
+    setStatus(`Added ${name}.`, "ok");
+  } catch (e) {
+    setStatus("Import failed: " + e.message, "error");
+  }
+}
+function renderAudioInspector(body, a) {
+  body.innerHTML = "";
+  const title = document.createElement("div");
+  title.className = "inspector-subtitle";
+  title.textContent = a.kind === "voice" ? "Voiceover" : "Music";
+  body.appendChild(title);
+
+  const nm = document.createElement("div");
+  nm.style.cssText = "font-size:12px;color:var(--text);word-break:break-all";
+  nm.textContent = a.name || a.src;
+  body.appendChild(nm);
+
+  const kind = document.createElement("select");
+  [["music", "Music"], ["voice", "Voiceover"]].forEach(([v, lbl]) => { const o = document.createElement("option"); o.value = v; o.textContent = lbl; o.selected = a.kind === v; kind.appendChild(o); });
+  kind.onchange = () => { a.kind = kind.value; markAudioDirty(); };
+  body.appendChild(field("Track", kind));
+
+  body.appendChild(field("Start (ms)", numberInput(a.start, (v) => { a.start = Math.max(0, v || 0); markAudioDirty(); }, 0, 600000, 50)));
+  body.appendChild(field("Volume (0–1)", numberInput(a.volume, (v) => { a.volume = Math.min(1, Math.max(0, v ?? 1)); markAudioDirty(); }, 0, 1, 0.05)));
+  body.appendChild(field("Trim start (ms)", numberInput(a.trimStart, (v) => { a.trimStart = Math.max(0, v || 0); markAudioDirty(); }, 0, 600000, 50)));
+
+  const te = document.createElement("input");
+  te.type = "number"; te.min = 0; te.step = 50; te.placeholder = "end of file";
+  if (a.trimEnd != null) te.value = a.trimEnd;
+  te.onchange = () => { a.trimEnd = te.value === "" ? null : Math.max(0, Number(te.value) || 0); markAudioDirty(); };
+  body.appendChild(field("Trim end (ms)", te));
+
+  body.appendChild(mkBtn("Remove track", () => {
+    state.demo.audio = state.demo.audio.filter((x) => x !== a);
+    state.selectedAudioId = null;
+    renderInspector(); markAudioDirty();
+  }));
 }
 
 // Pointer handling on the timeline: scrub (empty/ruler), select+drag-reorder (clip body),
 // resize (right-edge handle).
 function initTimelinePointer() {
   const scroll = $("#timeline-scroll");
-  let mode = null; // "scrub" | "drag" | "resize"
-  let clipId = null, startX = 0, startDur = 0;
+  let mode = null; // "scrub" | "drag" | "resize" | "audio"
+  let clipId = null, startX = 0, startDur = 0, audioId = null, startAudioStart = 0;
 
   const timeAtClientX = (clientX) => {
     const rect = scroll.getBoundingClientRect();
@@ -233,12 +337,18 @@ function initTimelinePointer() {
 
   scroll.addEventListener("pointerdown", (e) => {
     const clipEl = e.target.closest(".clip");
+    const audioEl = e.target.closest(".audio-clip");
     if (e.target.classList.contains("clip-resize")) {
       mode = "resize"; clipId = clipEl.dataset.id; startX = e.clientX;
       startDur = state.demo.clips.find((c) => c.id === clipId).duration;
+    } else if (audioEl) {
+      mode = "audio"; audioId = audioEl.dataset.audioId; startX = e.clientX;
+      const a = state.demo.audio.find((x) => x.id === audioId);
+      startAudioStart = a.start;
+      selectAudio(audioId);
     } else if (clipEl) {
       mode = "drag"; clipId = clipEl.dataset.id; startX = e.clientX;
-      state.selectedId = clipId; renderInspector(); renderTimeline();
+      state.selectedAudioId = null; state.selectedId = clipId; renderInspector(); renderTimeline();
       playing = false; seekTo(clipStart(clipId));
     } else {
       mode = "scrub"; playing = false; seekTo(timeAtClientX(e.clientX));
@@ -258,12 +368,16 @@ function initTimelinePointer() {
       // reorder preview: compute target index from pointer position
       const idx = indexAtClientX(e.clientX);
       reorderTo(clipId, idx);
+    } else if (mode === "audio") {
+      const a = state.demo.audio.find((x) => x.id === audioId);
+      if (a) { a.start = Math.max(0, Math.round((startAudioStart + ((e.clientX - startX) / PPS) * 1000) / 50) * 50); renderAudioLane(); }
     }
   });
 
   const end = (e) => {
     if (mode === "resize" || mode === "drag") markDirty();
-    mode = null; clipId = null;
+    else if (mode === "audio") markAudioDirty();
+    mode = null; clipId = null; audioId = null;
     try { scroll.releasePointerCapture(e.pointerId); } catch {}
   };
   scroll.addEventListener("pointerup", end);
@@ -331,6 +445,8 @@ function transportLoop(now) {
     if (r) r.seek(playT);
     updatePlayhead();
   }
+  const r = renderer();
+  if (r && r.audioTick) r.audioTick(playT, playing);
   updateSelectionOverlay();
   requestAnimationFrame(transportLoop);
 }
@@ -346,6 +462,12 @@ function field(label, control) {
 }
 function renderInspector() {
   const body = $("#inspector-body");
+  // An audio track takes over the inspector when one is selected.
+  if (state.selectedAudioId) {
+    const a = selectedAudio();
+    if (a) { renderAudioInspector(body, a); return; }
+    state.selectedAudioId = null;
+  }
   const c = selectedClip();
   body.innerHTML = "";
   if (!c) { body.innerHTML = '<p class="inspector-empty">Select a clip in the timeline.</p>'; return; }
@@ -715,12 +837,15 @@ async function loadProject(fresh = false, reload = false) {
   state.screens = data.screens;
   state.demo = data.demo;
   state.selectedId = state.demo.clips[0]?.id || null;
+  state.selectedElementId = null;
+  state.selectedAudioId = null;
   resetHistory();
   $("#current-project").textContent = state.project;
   renderPalette();
   renderTimeline();
   renderInspector();
   if (reload) await reloadPreview(); else { pushToRenderer(); fitPreview(); }
+  pushAudioToRenderer();
   setStatus(fresh ? "Re-seeded from the prototype flow." : "");
 }
 
@@ -741,6 +866,9 @@ async function main() {
   };
   $("#export").onclick = doExport;
   $("#format").onchange = () => {};
+  $("#add-music").onclick = () => importAudio("music");
+  $("#add-voice").onclick = () => importAudio("voice");
+  $("#audio-file").onchange = (e) => { const f = e.target.files[0]; e.target.value = ""; if (f) uploadAudio(f, pendingAudioKind); };
   $("#project-switch").onclick = (e) => { e.stopPropagation(); toggleProjectMenu(); };
   document.addEventListener("click", (e) => {
     if (!e.target.closest(".project-switch-wrap")) $("#project-menu").hidden = true;

@@ -108,6 +108,30 @@ test("validateDemo rejects a canvas element with a bad kind", async () => {
   );
 });
 
+test("normalizeDemo normalizes audio tracks and clamps volume", () => {
+  const d = normalizeDemo({
+    clips: [{ type: "screen", screen: "Login", duration: 1000 }],
+    audio: [
+      { kind: "voice", src: "proto.assets/vo.mp3", name: "vo", start: -5, volume: 2, trimStart: 100, dur: 8000 },
+      { kind: "music", start: 0 }, // dropped: no src
+    ],
+  });
+  assert.equal(d.audio.length, 1);
+  assert.equal(d.audio[0].kind, "voice");
+  assert.equal(d.audio[0].start, 0); // clamped >= 0
+  assert.equal(d.audio[0].volume, 1); // clamped <= 1
+  assert.equal(d.audio[0].trimEnd, null);
+  assert.ok(d.audio[0].id);
+});
+
+test("validateDemo rejects audio without a src", async () => {
+  const model = await loadPrototype(DEMO);
+  assert.throws(
+    () => validateDemo({ clips: [{ type: "screen", screen: "Login", duration: 1000 }], audio: [{ kind: "music", src: "" }] }, model),
+    /needs a src/i
+  );
+});
+
 test("validateDemo rejects an override without an elementId", async () => {
   const model = await loadPrototype(DEMO);
   assert.throws(

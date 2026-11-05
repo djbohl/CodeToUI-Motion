@@ -105,7 +105,9 @@ Demo document shape:
 Element animation (M2): pick an element on a clip's screen, give it a preset entrance
 (pop/fade/slide/scale) or custom CSS/JS, and drag/resize it on the preview overlay. Or add
 a **blank-canvas clip** with text/box elements (title cards, callouts) that animate the
-same way. Planned next: music + voiceover (M3). See [docs/roadmap.md](./docs/roadmap.md).
+same way. Add **music / voiceover** (M3) from the timeline — imported into the project's
+`proto.assets/`, previewed in sync, and muxed into the export. See
+[docs/roadmap.md](./docs/roadmap.md).
 
 ## Credits
 

@@ -3,7 +3,7 @@
 // desktop can't drift. It operates on one *active* project at a time within a projects
 // root (CodeToUI's own root), and drives the engine to preview and render demo videos.
 
-import { readFile, writeFile, mkdtemp, rm, stat } from "node:fs/promises";
+import { readFile, writeFile, mkdtemp, mkdir, rm, stat } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -22,6 +22,16 @@ async function readJsonBody(req) {
   for await (const chunk of req) chunks.push(chunk);
   return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
 }
+async function readRawBody(req) {
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  return Buffer.concat(chunks);
+}
+const ASSETS_DIR = "proto.assets"; // imported audio lives here, inside the project
+const AUDIO_CT = {
+  ".mp3": "audio/mpeg", ".wav": "audio/wav", ".m4a": "audio/mp4", ".aac": "audio/aac",
+  ".ogg": "audio/ogg", ".oga": "audio/ogg", ".webm": "audio/webm", ".flac": "audio/flac",
+};
 
 async function fileExists(p) {
   try {
@@ -121,6 +131,33 @@ export function createVideoApi({ projectsRoot, initialProject }) {
         return;
       }
 
+      // Import an audio file: raw body, ?name=&kind=. Saved under the project's assets.
+      if (url === "/api/audio" && req.method === "POST") {
+        const query = new URLSearchParams(req.url.split("?")[1] || "");
+        const origName = query.get("name") || "audio";
+        const kind = query.get("kind") === "voice" ? "voice" : "music";
+        const ext = (path.extname(origName) || ".mp3").toLowerCase();
+        const buf = await readRawBody(req);
+        const assetsDir = path.join(activeDir, ASSETS_DIR);
+        await mkdir(assetsDir, { recursive: true });
+        const fileName = "a" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6) + ext;
+        await writeFile(path.join(assetsDir, fileName), buf);
+        json({ src: `${ASSETS_DIR}/${fileName}`, name: origName, kind });
+        return;
+      }
+
+      // Stream an imported asset back for the preview's <audio>.
+      if (url === "/api/asset" && req.method === "GET") {
+        const query = new URLSearchParams(req.url.split("?")[1] || "");
+        const src = query.get("src") || "";
+        const abs = path.resolve(activeDir, src);
+        if (!abs.startsWith(path.resolve(activeDir) + path.sep)) { json({ error: "bad path" }, 400); return; }
+        if (!(await fileExists(abs))) { json({ error: "not found" }, 404); return; }
+        res.setHeader("Content-Type", AUDIO_CT[path.extname(abs).toLowerCase()] || "application/octet-stream");
+        await new Promise((resolve) => { const s = createReadStream(abs); s.on("error", () => resolve()); res.on("close", resolve); s.pipe(res); });
+        return;
+      }
+
       if (url === "/api/render" && req.method === "POST") {
         const body = await readJsonBody(req);
         await renderToResponse(res, activeDir, activeName, body);
@@ -145,9 +182,17 @@ export function createVideoApi({ projectsRoot, initialProject }) {
     const work = await mkdtemp(path.join(tmpdir(), "c2p-web-"));
     const framesDir = path.join(work, "frames");
     const outPath = path.join(work, `${name}.${format}`);
+    // Resolve audio tracks to absolute file paths for ffmpeg (skip any missing files).
+    const audio = [];
+    for (const a of demo.audio || []) {
+      const p = path.resolve(activeDir, a.src);
+      if (p.startsWith(path.resolve(activeDir) + path.sep) && (await fileExists(p))) {
+        audio.push({ path: p, start: a.start, volume: a.volume, trimStart: a.trimStart, trimEnd: a.trimEnd });
+      }
+    }
     try {
       const manifest = await captureDemo(model, demo, { framesDir, fps: demo.fps, format });
-      await encode(manifest, outPath);
+      await encode(manifest, outPath, audio);
 
       res.statusCode = 200;
       res.setHeader("Content-Type", format === "webm" ? "video/webm" : "video/mp4");
