@@ -1,7 +1,7 @@
 {
   "name": "codetoprototype",
   "version": "0.1.0",
-  "description": "Turn a CodeToUI click-through prototype into a walkthrough video (MP4/WebM) with light editing (trim, speed, captions).",
+  "description": "CodeToUI Motion — turn a CodeToUI prototype into a demo video (MP4/WebM): a timeline of clips with transitions, captions, and the screens' own animations.",
   "type": "module",
   "bin": {
     "codetoprototype": "src/cli.js"

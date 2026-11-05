@@ -14,7 +14,6 @@ async function seedRoot() {
   await cp(DEMO_SRC, path.join(root, "Demo"), { recursive: true });
   return root;
 }
-
 function mockReq(method, url, bodyObj) {
   const body = bodyObj !== undefined ? JSON.stringify(bodyObj) : "";
   const r = Readable.from([Buffer.from(body)]);
@@ -23,23 +22,16 @@ function mockReq(method, url, bodyObj) {
   return r;
 }
 function mockRes() {
-  return {
-    statusCode: 200,
-    headers: {},
-    body: null,
-    setHeader(k, v) { this.headers[k.toLowerCase()] = v; },
-    end(d) { this.body = d; },
-    on() {},
-  };
+  return { statusCode: 200, headers: {}, body: null,
+    setHeader(k, v) { this.headers[k.toLowerCase()] = v; }, end(d) { this.body = d; }, on() {} };
 }
 async function call(api, method, url, body) {
   const res = mockRes();
   let nextCalled = false;
   await api.middleware(mockReq(method, url, body), res, () => (nextCalled = true));
-  return { res, nextCalled, json: tryJson(res.body) };
-}
-function tryJson(s) {
-  try { return JSON.parse(s); } catch { return null; }
+  let json = null;
+  try { json = JSON.parse(res.body); } catch {}
+  return { res, nextCalled, json };
 }
 
 test("GET /api/projects lists projects + active", async () => {
@@ -51,65 +43,54 @@ test("GET /api/projects lists projects + active", async () => {
   assert.equal(json.active, "Demo");
 });
 
-test("GET /api/project returns model summary + auto-walk script", async () => {
+test("GET /api/project returns a seeded demo", async () => {
   const root = await seedRoot();
   const api = createVideoApi({ projectsRoot: root, initialProject: "Demo" });
   const { json } = await call(api, "GET", "/api/project");
   assert.equal(json.activeProject, "Demo");
-  assert.equal(json.start, "Login");
   assert.deepEqual(json.screens.sort(), ["Home", "Login"]);
-  assert.equal(json.links[0].elementId, "el-4fb756");
-  assert.ok(json.script.steps.length >= 2, "has a walkthrough");
-  assert.equal(json.script.steps[1].click, "el-4fb756");
+  assert.deepEqual(json.demo.clips.map((c) => c.screen), ["Login", "Home", "Login"]);
+  assert.equal(json.demo.clips[1].transitionIn.type, "slide-up");
 });
 
-test("POST /api/walkthrough validates + writes proto.video.json", async () => {
+test("POST /api/demo validates + writes proto.demo.json, served back next GET", async () => {
   const root = await seedRoot();
   const api = createVideoApi({ projectsRoot: root, initialProject: "Demo" });
   const { json: proj } = await call(api, "GET", "/api/project");
-  const { res, json } = await call(api, "POST", "/api/walkthrough", { script: proj.script });
+  const edited = { ...proj.demo, clips: proj.demo.clips.slice(0, 2) };
+  const { res, json } = await call(api, "POST", "/api/demo", { demo: edited });
   assert.equal(res.statusCode, 200);
   assert.equal(json.ok, true);
-  const saved = path.join(root, "Demo", "proto.video.json");
-  await stat(saved); // throws if missing
+  const saved = path.join(root, "Demo", "proto.demo.json");
+  await stat(saved);
   const parsed = JSON.parse(await readFile(saved, "utf8"));
-  assert.equal(parsed.steps[1].click, "el-4fb756");
-
-  // A saved script is served back by GET /api/project (not a fresh auto-walk).
+  assert.equal(parsed.clips.length, 2);
   const { json: again } = await call(api, "GET", "/api/project");
-  assert.deepEqual(again.script.steps.length, parsed.steps.length);
+  assert.equal(again.demo.clips.length, 2);
 });
 
-test("POST /api/walkthrough rejects an unknown screen", async () => {
+test("POST /api/demo rejects an unknown screen", async () => {
   const root = await seedRoot();
   const api = createVideoApi({ projectsRoot: root, initialProject: "Demo" });
-  const { res, json } = await call(api, "POST", "/api/walkthrough", { script: { steps: [{ screen: "Ghost" }] } });
+  const { res, json } = await call(api, "POST", "/api/demo", { demo: { clips: [{ type: "screen", screen: "Ghost", duration: 1000 }] } });
   assert.equal(res.statusCode, 500);
   assert.match(json.error, /unknown screen/i);
 });
 
-test("GET /api/preview serves the player HTML", async () => {
+test("GET /api/preview serves the demo renderer HTML", async () => {
   const root = await seedRoot();
   const api = createVideoApi({ projectsRoot: root, initialProject: "Demo" });
   const { res } = await call(api, "GET", "/api/preview");
   assert.equal(res.statusCode, 200);
   assert.match(res.headers["content-type"], /text\/html/);
-  assert.match(res.body, /window\.__proto/);
+  assert.match(res.body, /window\.__demo/);
   assert.match(res.body, /el-4fb756/);
 });
 
-test("POST /api/projects/active switches, 404 on unknown", async () => {
+test("POST /api/projects/active switches, 404 on unknown; non-/api falls through", async () => {
   const root = await seedRoot();
   const api = createVideoApi({ projectsRoot: root, initialProject: "Demo" });
-  const ok = await call(api, "POST", "/api/projects/active", { name: "Demo" });
-  assert.equal(ok.res.statusCode, 200);
-  const bad = await call(api, "POST", "/api/projects/active", { name: "Nope" });
-  assert.equal(bad.res.statusCode, 404);
-});
-
-test("non-/api/ URLs fall through to next()", async () => {
-  const root = await seedRoot();
-  const api = createVideoApi({ projectsRoot: root, initialProject: "Demo" });
-  const { nextCalled } = await call(api, "GET", "/index.html");
-  assert.equal(nextCalled, true);
+  assert.equal((await call(api, "POST", "/api/projects/active", { name: "Demo" })).res.statusCode, 200);
+  assert.equal((await call(api, "POST", "/api/projects/active", { name: "Nope" })).res.statusCode, 404);
+  assert.equal((await call(api, "GET", "/index.html")).nextCalled, true);
 });

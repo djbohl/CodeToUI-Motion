@@ -1,12 +1,12 @@
-# CodeToPrototype
+# CodeToUI Motion
 
-Turn a [CodeToUI Playground](https://github.com/djbohl/CodeToUI-Playground) click-through
-prototype into a **walkthrough video** (MP4/WebM), with light editing — trim, speed, and
-captions. Video lives here, in a separate tool, so the main app's install stays light.
+Turn a [CodeToUI Playground](https://github.com/djbohl/CodeToUI-Playground) prototype into
+a **demo video** (MP4/WebM). A timeline of clips you scrub and play, with visible
+transitions, timed captions, and — because each screen's own CSS/JS runs during playback —
+any motion you coded in CodeToUI just plays. Video lives here, in a separate tool, so the
+main app's install stays light.
 
-It takes a prototype — either a `projects/<name>/` folder **or** an exported standalone
-`.html` — replays its click-through navigation headlessly (driving real clicks with a
-synthetic cursor), records frames, and encodes them with a bundled ffmpeg.
+(The package/repo is `codetoprototype`; the app is branded **CodeToUI Motion**.)
 
 ## Install
 
@@ -18,57 +18,10 @@ This pulls `puppeteer` (bundled Chromium) and `ffmpeg-static` (bundled encoder).
 ffmpeg needed, though a system `ffmpeg` on PATH is used as a fallback if the bundled binary
 is missing.
 
-## Usage
+## The editor (web app)
 
-### Render a video (auto-walk)
-
-With no script, the tool auto-walks the prototype's link graph from its start screen:
-
-```bash
-# from a project folder
-npx codetoprototype render ../code-design/projects/Demo --out demo.mp4
-
-# from an exported standalone .html
-npx codetoprototype render ./my-prototype.html --out demo.mp4 --fps 30 --dwell 1500
-```
-
-Common flags: `--format mp4|webm` (default `mp4`), `--fps`, `--dwell` (ms held per screen),
-`--width` (device width px), `--scale` (device scale factor), `--no-cursor`.
-
-### Edit per-step with a walkthrough script
-
-Generate the auto-walk as an editable JSON script, tweak it, then render from it:
-
-```bash
-npx codetoprototype plan ../code-design/projects/Demo --out walkthrough.json
-# edit walkthrough.json ...
-npx codetoprototype render ../code-design/projects/Demo --script walkthrough.json --out demo.mp4
-```
-
-The script is the editable/AI-friendly artifact — a plain step list:
-
-```json
-{
-  "fps": 30,
-  "format": "mp4",
-  "steps": [
-    { "screen": "Login", "dwell": 1200 },
-    { "screen": "Login", "click": "el-4fb756", "transition": "slide-up",
-      "caption": { "text": "Tap to sign in", "at": 400, "for": 800 } },
-    { "screen": "Home", "dwell": 1500, "speed": 1.5 }
-  ]
-}
-```
-
-- **trim** — reorder/remove steps, or change a step's `dwell`
-- **speed** — per-step `speed` multiplier (`1.5` = 1.5× faster)
-- **captions** — per-step `caption` `{ text, at, for }` in ms relative to the step
-
-## Web app (form-based editor)
-
-A local web UI over the same engine — edit the walkthrough as a form, click-to-play
-preview the prototype, and render. It reads **CodeToUI's own projects folder** (shared
-disk truth, no export step), so point it there:
+A local web UI over the engine. It reads **CodeToUI's own projects folder** (shared disk
+truth — no export step), so point it there and open the project:
 
 ```bash
 # C2P_PROJECTS_ROOT = your CodeToUI projects folder (abs path or relative to cwd)
@@ -76,20 +29,22 @@ C2P_PROJECTS_ROOT=../code-design/projects npm run dev
 # then open http://localhost:5900/?project=Demo
 ```
 
-- **Project picker** — switch between projects in that folder.
-- **Step editor** — each walkthrough step is a row: the move (a link on that screen,
-  or back/home), dwell, speed, and an optional caption with timing. Add / remove /
-  reorder steps, or **↻ Regenerate auto-walk** from the links graph.
-- **▶ Play preview** — loads the prototype and you click through it yourself (no render).
-- **Save** — writes the script to `proto.video.json` inside the project folder.
-- **⬇ Render** — runs the headless capture + ffmpeg and downloads the MP4/WebM.
+- **Timeline** (bottom) — clips in sequence; drag a clip to reorder, drag its right edge
+  to retime, click to select, click the ruler to scrub. A playhead tracks playback.
+- **Screens palette** (left) — click a screen to add it as a clip.
+- **Preview** (center) — plays the demo you're composing (▶ / ⏸, scrub). This is *not* an
+  interactive click-through — CodeToUI already does that.
+- **Inspector** (right) — the selected clip's screen, duration, transition-in, and captions.
+- **Seed from flow** — (re)build the timeline from the prototype's click-flow.
+- **Export** — render the demo to MP4/WebM (headless Chromium + ffmpeg) and download it.
+
+Edits autosave to **`proto.demo.json`** inside the project folder (disk truth).
 
 ### Launch from CodeToUI (ready-to-apply hook)
 
-CodeToUI already reserves a disabled **Video** button in its Export modal
-(`index.html`, "in the CodeToPrototype companion tool"). To wire it, in the CodeToUI
-repo: give that button an id and remove `disabled`, then add a handler that opens this
-app on the active project — no IPC/preload needed:
+CodeToUI reserves a disabled **Video** button in its Export modal (`index.html`, "in the
+CodeToPrototype companion tool"). To wire it, in the CodeToUI repo give that button an id
+and remove `disabled`, then add a handler — no IPC/preload needed:
 
 ```js
 // CodeToUI src/main.js — after the active project is known (activeProject)
@@ -98,22 +53,52 @@ videoBtn.addEventListener("click", () => {
 });
 ```
 
-(Run CodeToPrototype with `C2P_PROJECTS_ROOT` pointed at the same projects folder
-CodeToUI is using.)
+(Run CodeToUI Motion with `C2P_PROJECTS_ROOT` pointed at the same projects folder.)
+
+## CLI
+
+The demo document (`proto.demo.json`) is the editable/AI-friendly artifact — the same one
+the editor reads/writes. Seed it from the click-flow, tweak, render:
+
+```bash
+npx codetoprototype seed   ../code-design/projects/Demo --out demo.json
+# edit demo.json (clips, durations, transitions, captions) ...
+npx codetoprototype render ../code-design/projects/Demo --demo demo.json --out demo.mp4
+```
+
+`render` with no `--demo` uses the project's saved `proto.demo.json`, or a fresh seed.
+Flags: `--format mp4|webm`, `--fps`, `--scale`, `--keep-frames`.
+
+Demo document shape:
+
+```json
+{ "version": 1, "fps": 30, "size": { "width": 390, "height": 844 },
+  "clips": [
+    { "id": "c1", "type": "screen", "screen": "Login", "duration": 2000,
+      "transitionIn": { "type": "instant", "duration": 0 },
+      "captions": [ { "text": "Sign in", "at": 300, "for": 1200 } ] },
+    { "id": "c2", "type": "screen", "screen": "Home", "duration": 2000,
+      "transitionIn": { "type": "slide-up", "duration": 400 }, "captions": [] }
+  ] }
+```
 
 ## How it works
 
 - `src/load-project.js` — reads a project folder or parses an exported `.html` into a model.
-- `src/player.js` — the CodeToUI standalone player (navigation engine) plus a synthetic
-  cursor overlay and a driver hook.
-- `src/walkthrough.js` — auto-walk planner + script validation.
-- `src/capture.js` — Puppeteer driver: deterministic fixed-fps frame capture.
+- `src/compose-screen.js` — shared screen → srcdoc composer (runs each screen's CSS/JS).
+- `src/demo.js` — the `proto.demo.json` model: seed-from-flow, validate, normalize.
+- `src/demo-renderer.js` — the keystone: a page that plays the timeline on a clock
+  (transitions + captions as functions of time), exposing `window.__demo`. Powers both the
+  live preview and the headless export.
+- `src/capture.js` — `captureDemo` steps the renderer frame-by-frame in headless Chromium.
 - `src/encode.js` — ffmpeg frames → MP4/WebM.
-- `src/cli.js` — the `plan` / `render` commands.
+- `src/cli.js` — the `seed` / `render` commands.
 - `server/create-video-api.js` — the web backend factory (one shared `{ middleware, close }`,
   mirroring CodeToUI's `create-api.js`), mounted by `server/plugin.js` (Vite dev plugin).
-- `src/ui/` — the browser UI (form editor + preview + render). Engine modules stay
-  server-only so puppeteer/ffmpeg never enter the client bundle.
+- `src/ui/` — the browser editor (timeline, preview, inspector) in CodeToUI's visual style.
+
+Planned next: per-element animation (presets + custom CSS/JS) and blank-canvas clips (M2),
+then music + voiceover (M3).
 
 ## Credits
 

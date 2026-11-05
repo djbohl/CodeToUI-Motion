@@ -4,7 +4,7 @@ node_modules/
 # render output + scratch frames
 *.mp4
 *.webm
-*.walkthrough.json
+*.demo.json
 c2p-frames-*/
 
 # OS / editor
