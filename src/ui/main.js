@@ -886,14 +886,29 @@ async function loadProject(fresh = false, reload = false) {
   setStatus(fresh ? "Re-seeded from the prototype flow." : "");
 }
 
+const THEMES = [
+  { id: "dark", label: "☾ Dark" },
+  { id: "light", label: "☀ Light" },
+  { id: "spooky", label: "🌙 Spooky" },
+];
+function applyTheme(id) {
+  const t = THEMES.find((x) => x.id === id) || THEMES[0];
+  document.documentElement.setAttribute("data-theme", t.id);
+  const btn = $("#theme");
+  if (btn) btn.textContent = t.label;
+  try { localStorage.setItem("c2p-theme", t.id); } catch {}
+  window.dispatchEvent(new CustomEvent("c2p-theme", { detail: t.id }));
+}
+function cycleTheme() {
+  const cur = document.documentElement.getAttribute("data-theme") || "dark";
+  const i = THEMES.findIndex((x) => x.id === cur);
+  applyTheme(THEMES[(i + 1) % THEMES.length].id);
+}
+
 async function main() {
-  // theme
-  $("#theme").onclick = () => {
-    const html = document.documentElement;
-    const light = html.getAttribute("data-theme") === "light";
-    html.setAttribute("data-theme", light ? "dark" : "light");
-    $("#theme").textContent = light ? "☾ Dark" : "☀ Light";
-  };
+  // theme (dark → light → spooky), persisted
+  applyTheme(localStorage.getItem("c2p-theme") || "dark");
+  $("#theme").onclick = cycleTheme;
   // transport
   $("#play-pause").onclick = togglePlay;
   $("#to-start").onclick = () => { playing = false; seekTo(0); };

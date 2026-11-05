@@ -17,6 +17,20 @@ const PETS = [
   { emoji: "🐲", kind: "Draggo" },
   { emoji: "🤖", kind: "Botling" },
 ];
+// In the spooky (whimsigoth) theme the pet in each slot takes a spooky form.
+const SPOOKY_PETS = [
+  { emoji: "👻", kind: "Spirit" },
+  { emoji: "🌙", kind: "Luna" },
+  { emoji: "🦇", kind: "Echo" },
+  { emoji: "🐈‍⬛", kind: "Shadow" },
+  { emoji: "🔮", kind: "Oracle" },
+  { emoji: "🕯️", kind: "Ember" },
+  { emoji: "🦉", kind: "Hoot" },
+  { emoji: "🌑", kind: "Nyx" },
+];
+function activePets() {
+  return document.documentElement.getAttribute("data-theme") === "spooky" ? SPOOKY_PETS : PETS;
+}
 
 const NAMES = ["Pixel", "Boop", "Nibble", "Zap", "Waffles", "Mochi", "Gizmo", "Taco", "Sprout", "Bit", "Noodle", "Pip"];
 
@@ -110,7 +124,8 @@ export function initPet({ getContext } = {}) {
     if (pets.length < MAX_PETS) renderAddUnit();
   }
   function renderPetUnit(idx) {
-    const pet = PETS[pets[idx].i] || PETS[0];
+    const set = activePets();
+    const pet = set[pets[idx].i] || set[0];
     const unit = document.createElement("div");
     unit.className = "pet";
     const bubbleEl = document.createElement("div");
@@ -167,7 +182,7 @@ export function initPet({ getContext } = {}) {
     const picker = document.createElement("div");
     picker.className = "pet-picker";
     picker.hidden = true;
-    PETS.forEach((pet, i) => {
+    activePets().forEach((pet, i) => {
       const b = document.createElement("button");
       b.className = "pet-pick";
       b.textContent = pet.emoji;
@@ -216,6 +231,12 @@ export function initPet({ getContext } = {}) {
     scheduleChatter();
     setTimeout(() => speak(0, `${pets[0].name} followed you to Motion!`), 1500);
   }
+
+  // Re-render when the theme changes so pets take their spooky (or normal) form.
+  window.addEventListener("c2p-theme", () => {
+    render();
+    if (pets.length) speak(0, document.documentElement.getAttribute("data-theme") === "spooky" ? "OoOoO… 🌙" : "Back to normal!");
+  });
 
   return { react };
 }
