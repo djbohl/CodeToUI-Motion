@@ -14,6 +14,8 @@
 import { mkdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { buildPlayerHtml } from "./player.js";
+import { buildDemoHtml } from "./demo-renderer.js";
+import { demoDuration } from "./demo.js";
 
 const TRAVEL_MS = 420; // cursor glide to target before a click
 const RIPPLE_MS = 420; // click ripple expand/fade
@@ -43,18 +45,7 @@ export async function captureFrames(model, script, opts) {
   await rm(framesDir, { recursive: true, force: true });
   await mkdir(framesDir, { recursive: true });
 
-  let puppeteer;
-  try {
-    puppeteer = (await import("puppeteer")).default;
-  } catch {
-    throw new Error("Puppeteer isn't installed. Run: npm install");
-  }
-  const browser = await puppeteer.launch({
-    headless: true,
-    pipe: true,
-    args: ["--no-sandbox", "--disable-dev-shm-usage"],
-    ...(opts.launch || {}),
-  });
+  const browser = await launchBrowser(opts.launch);
 
   let frameNo = 0;
   try {
@@ -158,4 +149,63 @@ export async function captureFrames(model, script, opts) {
   }
 
   return { framesDir, fps, format: script.format, frameCount: frameNo };
+}
+
+async function launchBrowser(launchOpts) {
+  let puppeteer;
+  try {
+    puppeteer = (await import("puppeteer")).default;
+  } catch {
+    throw new Error("Puppeteer isn't installed. Run: npm install");
+  }
+  return puppeteer.launch({
+    headless: true,
+    pipe: true,
+    args: ["--no-sandbox", "--disable-dev-shm-usage"],
+    ...(launchOpts || {}),
+  });
+}
+
+/**
+ * Record a demo document by loading the demo renderer and stepping its clock across the
+ * timeline at a fixed fps. Frame count is deterministic (= ceil(duration/1000*fps)); we
+ * seek to each frame's exact time AND sleep the real slice between grabs so authored
+ * screen CSS/JS animations advance naturally too.
+ * @param {import('./load-project.js').PrototypeModel} model
+ * @param {object} demo  normalized demo document
+ * @param {{ framesDir:string, fps?:number, format?:string, scale?:number, launch?:object }} opts
+ * @returns {Promise<{ framesDir:string, fps:number, format:string, frameCount:number }>}
+ */
+export async function captureDemo(model, demo, opts) {
+  const fps = opts.fps || demo.fps || 30;
+  const format = opts.format || "mp4";
+  const scale = opts.scale || 2;
+  const { width, height } = demo.size;
+  const framesDir = opts.framesDir;
+
+  await rm(framesDir, { recursive: true, force: true });
+  await mkdir(framesDir, { recursive: true });
+
+  const duration = demoDuration(demo);
+  const frameCount = Math.max(1, Math.ceil((duration / 1000) * fps));
+  const dt = 1000 / fps;
+
+  const browser = await launchBrowser(opts.launch);
+  try {
+    const page = await browser.newPage();
+    await page.setViewport({ width, height, deviceScaleFactor: scale });
+    await page.setContent(buildDemoHtml(model, demo), { waitUntil: "load" });
+    await page.waitForFunction("window.__demo && typeof window.__demo.seek === 'function'", { timeout: 5000 });
+
+    for (let f = 0; f < frameCount; f++) {
+      const t = Math.min(duration, f * dt);
+      await page.evaluate((ms) => window.__demo.seek(ms), t);
+      await page.screenshot({ path: path.join(framesDir, `frame-${pad6(f + 1)}.png`), type: "png" });
+      await sleep(dt); // let authored iframe CSS/JS animations advance in real time
+    }
+  } finally {
+    await browser.close().catch(() => {});
+  }
+
+  return { framesDir, fps, format, frameCount };
 }
