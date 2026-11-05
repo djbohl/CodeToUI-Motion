@@ -947,11 +947,7 @@ async function loadProject(fresh = false, reload = false) {
   setStatus(fresh ? "Re-seeded from the prototype flow." : "");
 }
 
-const THEMES = [
-  { id: "dark", label: "☾ Dark" },
-  { id: "light", label: "☀ Light" },
-  { id: "spooky", label: "🌙 Spooky" },
-];
+const MODE_LABEL = { dark: "☾ Dark", light: "☀ Light" };
 // A hand-drawn-ish corner spiderweb as an SVG background (radial spokes + sagging rings).
 function makeCornerWeb(size, anchor) {
   const O = anchor === "br" ? [size, size] : [0, 0];
@@ -972,15 +968,24 @@ function makeCornerWeb(size, anchor) {
   const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='${size}' height='${size}' viewBox='0 0 ${size} ${size}'><path d='${d}' fill='none' stroke='rgba(185,167,230,0.22)' stroke-width='1'/></svg>`;
   return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
 }
-function applyTheme(id) {
-  const t = THEMES.find((x) => x.id === id) || THEMES[0];
-  document.documentElement.setAttribute("data-theme", t.id);
-  const btn = $("#theme");
-  if (btn) btn.textContent = t.label;
+// Base mode (dark/light) and theme style (none/spooky) are independent controls that
+// combine into one effective theme: spooky overlays onto whichever base is active, with
+// its own light variant (greys, not near-black) rather than a separate toggle.
+function effectiveTheme(mode, style) {
+  if (style === "spooky") return mode === "light" ? "spooky-light" : "spooky";
+  return mode;
+}
+function applyTheme(mode, style) {
+  const effective = effectiveTheme(mode, style);
+  document.documentElement.setAttribute("data-theme", effective);
+  const modeBtn = $("#theme-mode");
+  if (modeBtn) modeBtn.textContent = MODE_LABEL[mode] || MODE_LABEL.dark;
+  const styleSelect = $("#theme-style");
+  if (styleSelect) styleSelect.value = style;
   // Spooky swaps the main canvas's grid for corner spiderwebs; others fall back to CSS.
   const pane = $("#stage-pane");
   if (pane) {
-    if (t.id === "spooky") {
+    if (style === "spooky") {
       pane.style.backgroundImage = `${makeCornerWeb(320, "tl")}, ${makeCornerWeb(260, "br")}`;
       pane.style.backgroundRepeat = "no-repeat, no-repeat";
       pane.style.backgroundPosition = "top left, bottom right";
@@ -989,19 +994,26 @@ function applyTheme(id) {
       pane.style.backgroundImage = pane.style.backgroundRepeat = pane.style.backgroundPosition = pane.style.backgroundSize = "";
     }
   }
-  try { localStorage.setItem("c2p-theme", t.id); } catch {}
-  window.dispatchEvent(new CustomEvent("c2p-theme", { detail: t.id }));
+  try {
+    localStorage.setItem("c2p-theme-mode", mode);
+    localStorage.setItem("c2p-theme-style", style);
+  } catch {}
+  window.dispatchEvent(new CustomEvent("codetoui-theme", { detail: effective }));
 }
-function cycleTheme() {
-  const cur = document.documentElement.getAttribute("data-theme") || "dark";
-  const i = THEMES.findIndex((x) => x.id === cur);
-  applyTheme(THEMES[(i + 1) % THEMES.length].id);
+function toggleThemeMode() {
+  const cur = localStorage.getItem("c2p-theme-mode") || "dark";
+  const next = cur === "dark" ? "light" : "dark";
+  applyTheme(next, localStorage.getItem("c2p-theme-style") || "none");
+}
+function setThemeStyle(style) {
+  applyTheme(localStorage.getItem("c2p-theme-mode") || "dark", style);
 }
 
 async function main() {
-  // theme (dark → light → spooky), persisted
-  applyTheme(localStorage.getItem("c2p-theme") || "dark");
-  $("#theme").onclick = cycleTheme;
+  // theme: dark/light toggle + theme-style dropdown, each persisted independently
+  applyTheme(localStorage.getItem("c2p-theme-mode") || "dark", localStorage.getItem("c2p-theme-style") || "none");
+  $("#theme-mode").onclick = toggleThemeMode;
+  $("#theme-style").onchange = (e) => setThemeStyle(e.target.value);
   // transport
   $("#play-pause").onclick = togglePlay;
   $("#to-start").onclick = () => { playing = false; seekTo(0); };

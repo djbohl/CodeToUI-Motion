@@ -56,19 +56,45 @@
   --danger: #e68aa0;
   --shadow: rgba(0, 0, 0, 0.72);
 }
+/* Spooky, light base — same two-accent idea (muted amethyst + candle amber), inverted
+   lightness: greys instead of near-black so it stays readable in a light theme. */
+:root[data-theme="spooky-light"] {
+  --bg: #c6c4ce;
+  --surface: #d3d1db;
+  --surface-2: #dedce6;
+  --canvas-bg: #bcbac5;
+  --grid: rgba(90, 80, 120, 0.08);
+  --border: #8e8ba0;
+  --border-strong: #6c6880;
+  --text: #2a2733;
+  --muted: #5c5870;
+  --accent: #6f52a8;
+  --accent-2: #9c6a1f;
+  --accent-ink: #dedce6;
+  --ok: #2f7a4a;
+  --danger: #a13350;
+  --shadow: rgba(40, 30, 55, 0.3);
+}
 /* Candlelit vignette — a soft spotlight on the device, darkening the canvas edges for a
    cozy, eerie depth. Scoped to the stage so it actually shows (never eats clicks). */
-:root[data-theme="spooky"] .stage-pane::after {
+:root[data-theme="spooky"] .stage-pane::after,
+:root[data-theme="spooky-light"] .stage-pane::after {
   content: ""; position: absolute; inset: 0; z-index: 3; pointer-events: none;
   background: radial-gradient(120% 110% at 50% 46%, transparent 48%, rgba(0, 0, 0, 0.55) 100%);
 }
 /* A faint glow on the accents — the whimsigoth touch, kept subtle. */
-:root[data-theme="spooky"] .brand-accent { text-shadow: 0 0 10px rgba(185, 167, 230, 0.6); }
+:root[data-theme="spooky"] .brand-accent,
+:root[data-theme="spooky-light"] .brand-accent { text-shadow: 0 0 10px rgba(185, 167, 230, 0.6); }
 :root[data-theme="spooky"] .sidebar-title,
-:root[data-theme="spooky"] .inspector-subtitle { text-shadow: 0 0 9px rgba(216, 178, 106, 0.4); }
+:root[data-theme="spooky"] .inspector-subtitle,
+:root[data-theme="spooky-light"] .sidebar-title,
+:root[data-theme="spooky-light"] .inspector-subtitle { text-shadow: 0 0 9px rgba(216, 178, 106, 0.4); }
 :root[data-theme="spooky"] .topbar-btn.active,
 :root[data-theme="spooky"] .clip.selected,
-:root[data-theme="spooky"] .audio-clip.selected {
+:root[data-theme="spooky"] .audio-clip.selected,
+:root[data-theme="spooky-light"] .topbar-btn.active,
+:root[data-theme="spooky-light"] .clip.selected,
+:root[data-theme="spooky-light"] .audio-clip.selected {
   box-shadow: 0 0 12px rgba(185, 167, 230, 0.45), 2px 2px 0 var(--shadow);
 }
 

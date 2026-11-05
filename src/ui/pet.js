@@ -28,8 +28,12 @@ const SPOOKY_PETS = [
   { emoji: "🦉", kind: "Hoot" },
   { emoji: "🌑", kind: "Nyx" },
 ];
+function isSpookyTheme() {
+  const t = document.documentElement.getAttribute("data-theme");
+  return t === "spooky" || t === "spooky-light";
+}
 function activePets() {
-  return document.documentElement.getAttribute("data-theme") === "spooky" ? SPOOKY_PETS : PETS;
+  return isSpookyTheme() ? SPOOKY_PETS : PETS;
 }
 
 const NAMES = ["Pixel", "Boop", "Nibble", "Zap", "Waffles", "Mochi", "Gizmo", "Taco", "Sprout", "Bit", "Noodle", "Pip"];
@@ -233,9 +237,9 @@ export function initPet({ getContext } = {}) {
   }
 
   // Re-render when the theme changes so pets take their spooky (or normal) form.
-  window.addEventListener("c2p-theme", () => {
+  window.addEventListener("codetoui-theme", () => {
     render();
-    if (pets.length) speak(0, document.documentElement.getAttribute("data-theme") === "spooky" ? "OoOoO… 🌙" : "Back to normal!");
+    if (pets.length) speak(0, isSpookyTheme() ? "OoOoO… 🌙" : "Back to normal!");
   });
 
   return { react };
