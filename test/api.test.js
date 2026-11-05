@@ -34,6 +34,14 @@ async function call(api, method, url, body) {
   return { res, nextCalled, json };
 }
 
+test("GET /api/ping reports liveness without an active project", async () => {
+  const api = createVideoApi({ projectsRoot: "/nonexistent", initialProject: null });
+  const { res, json } = await call(api, "GET", "/api/ping");
+  assert.equal(res.statusCode, 200);
+  assert.equal(json.ok, true);
+  assert.equal(json.app, "codetoui-motion");
+});
+
 test("GET /api/projects lists projects + active", async () => {
   const root = await seedRoot();
   const api = createVideoApi({ projectsRoot: root, initialProject: "Demo" });

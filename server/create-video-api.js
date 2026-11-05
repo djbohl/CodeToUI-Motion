@@ -76,6 +76,13 @@ export function createVideoApi({ projectsRoot, initialProject }) {
     };
 
     try {
+      // Liveness probe so CodeToUI can detect whether Motion is running before launching.
+      if (url === "/api/ping" && req.method === "GET") {
+        res.setHeader("Access-Control-Allow-Origin", "*"); // allow a cross-origin check from CodeToUI
+        json({ ok: true, app: "codetoui-motion" });
+        return;
+      }
+
       if (url === "/api/projects" && req.method === "GET") {
         json({ projects: await listProjects(projectsRoot), active: activeName });
         return;

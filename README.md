@@ -62,10 +62,18 @@ and remove `disabled`, then add a handler — no IPC/preload needed:
 
 ```js
 // CodeToUI src/main.js — after the active project is known (activeProject)
-videoBtn.addEventListener("click", () => {
+videoBtn.addEventListener("click", async () => {
   const pet = encodeURIComponent(localStorage.getItem("codetoui-pet") || "");
   const url = "http://localhost:5900/?project=" + encodeURIComponent(activeProject) +
     (pet ? "&pet=" + pet : "");
+  // Is Motion running? (GET /api/ping replies {ok:true}; CORS-open for this check.)
+  try {
+    const r = await fetch("http://localhost:5900/api/ping", { signal: AbortSignal.timeout(1200) });
+    if (!r.ok) throw 0;
+  } catch {
+    alert("Start CodeToUI Motion first:\n  npm run dev   (in the codetoprototype repo)\nor launch the Motion desktop app, then try again.");
+    return;
+  }
   window.open(url, "_blank");
 });
 ```
