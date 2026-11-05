@@ -460,6 +460,16 @@ function field(label, control) {
   wrap.append(span, control);
   return wrap;
 }
+function numberInput(value, onChange, min, max, step = 1) {
+  const el = document.createElement("input");
+  el.type = "number";
+  el.value = value;
+  if (min != null) el.min = min;
+  if (max != null) el.max = max;
+  el.step = step;
+  el.oninput = () => onChange(el.value === "" ? undefined : Number(el.value));
+  return el;
+}
 function renderInspector() {
   const body = $("#inspector-body");
   // An audio track takes over the inspector when one is selected.
