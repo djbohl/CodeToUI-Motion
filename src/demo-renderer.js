@@ -155,6 +155,12 @@ const RUNTIME = `
       seek:function(t){ pause(); applyAt(t); },
       play:play, pause:pause,
       setPick:function(on){ pickOn=!!on; try{ if(front&&front.contentDocument&&front.contentDocument.body) front.contentDocument.body.style.cursor = pickOn?'crosshair':''; }catch(e){} },
+      // Bounding box of an element in stage coordinates (the front iframe fills the
+      // stage at 0,0), so the editor can draw a selection overlay over it.
+      elementRect:function(id){
+        try{ var doc=front.contentDocument; if(!doc) return null; var el=doc.querySelector('[data-proto-id="'+id+'"]'); if(!el) return null;
+          var r=el.getBoundingClientRect(); return { x:r.left, y:r.top, w:r.width, h:r.height }; }catch(e){ return null; }
+      },
       // Live-update from the editor: swap in edited clips (and optionally resize the stage)
       // without reloading the page, then re-apply at the (clamped) current time.
       load:function(clips, size){

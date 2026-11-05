@@ -268,6 +268,7 @@ function transportLoop(now) {
     if (r) r.seek(playT);
     updatePlayhead();
   }
+  updateSelectionOverlay();
   requestAnimationFrame(transportLoop);
 }
 
@@ -391,7 +392,7 @@ function renderElementPanel(clip, body) {
     const chip = document.createElement("button");
     chip.className = "override-chip" + (o.elementId === state.selectedElementId ? " active" : "");
     chip.textContent = o.elementId + (o.animation ? " · " + o.animation.preset : o.hidden ? " · hidden" : "");
-    chip.onclick = () => { state.selectedElementId = o.elementId; renderInspector(); };
+    chip.onclick = () => selectElement(clip, o.elementId);
     list.appendChild(chip);
   });
   body.appendChild(list);
@@ -476,9 +477,87 @@ function onPickElement(clip, id) {
   if (!clip.overrides.find((o) => o.elementId === id)) {
     clip.overrides.push({ elementId: id, hidden: false, x: 0, y: 0, scale: 1, rotate: 0, animation: { preset: "pop", duration: 400, delay: 0, easing: "ease-out" } });
   }
-  state.selectedElementId = id;
-  renderInspector();
+  selectElement(clip, id);
   markDirty();
+}
+// Select an element and seek to the clip's settled state so the overlay sits on the
+// element's resting position (not mid-entrance-animation).
+function selectElement(clip, id) {
+  state.selectedElementId = id;
+  playing = false;
+  seekTo(clipStart(clip.id) + Math.max(0, clip.duration - 1));
+  renderInspector();
+}
+
+// --- selection overlay (drag to move, corner to scale) ----------------------
+let selDrag = null;
+function activeClipIdAt(t) {
+  let acc = 0;
+  for (const c of state.demo.clips) { acc += c.duration; if (t < acc) return c.id; }
+  return state.demo.clips[state.demo.clips.length - 1]?.id || null;
+}
+function rendererRect(id) {
+  const w = $("#preview").contentWindow;
+  return w && w.__demo && w.__demo.elementRect ? w.__demo.elementRect(id) : null;
+}
+function previewScale() {
+  const pr = $("#preview").getBoundingClientRect();
+  return pr.width / state.demo.size.width;
+}
+function ensureSelectionOverlay() {
+  if ($("#select-overlay")) return;
+  const ov = document.createElement("div");
+  ov.id = "select-overlay";
+  ov.hidden = true;
+  ov.innerHTML = '<div class="sel-box" id="sel-box"><div class="sel-resize" id="sel-resize" title="Drag to scale"></div></div>';
+  document.body.appendChild(ov);
+  $("#sel-box").addEventListener("pointerdown", (e) => { if (e.target.id !== "sel-resize") startSelDrag(e, "move"); });
+  $("#sel-resize").addEventListener("pointerdown", (e) => { e.stopPropagation(); startSelDrag(e, "resize"); });
+}
+function startSelDrag(e, mode) {
+  const c = selectedClip();
+  const o = c ? selectedOverride(c) : null;
+  if (!o) return;
+  const rect = rendererRect(o.elementId);
+  const scale = previewScale();
+  const baseW = rect && o.scale ? rect.w / o.scale : 0; // element width at scale 1, in stage px
+  selDrag = { mode, o, sx: e.clientX, sy: e.clientY, ox: o.x, oy: o.y, oscale: o.scale, baseW, scale };
+  window.addEventListener("pointermove", onSelMove);
+  window.addEventListener("pointerup", onSelUp, { once: true });
+  e.preventDefault();
+}
+function onSelMove(e) {
+  if (!selDrag) return;
+  const dx = e.clientX - selDrag.sx, dy = e.clientY - selDrag.sy;
+  if (selDrag.mode === "move") {
+    selDrag.o.x = Math.round(selDrag.ox + dx / selDrag.scale);
+    selDrag.o.y = Math.round(selDrag.oy + dy / selDrag.scale);
+  } else if (selDrag.baseW > 0) {
+    selDrag.o.scale = Math.max(0.1, +(selDrag.oscale + dx / (selDrag.baseW * selDrag.scale)).toFixed(2));
+  }
+  pushToRenderer(); // live; overlay follows via the transport loop
+}
+function onSelUp() {
+  window.removeEventListener("pointermove", onSelMove);
+  selDrag = null;
+  renderInspector(); // reflect new x/y/scale in the number fields
+  markDirty();
+}
+function updateSelectionOverlay() {
+  const ov = $("#select-overlay");
+  if (!ov) return;
+  const c = selectedClip();
+  const o = c ? selectedOverride(c) : null;
+  const rect = o && !o.hidden ? rendererRect(o.elementId) : null;
+  if (!rect || !c || activeClipIdAt(playT) !== c.id) { ov.hidden = true; return; }
+  const pr = $("#preview").getBoundingClientRect();
+  const scale = pr.width / state.demo.size.width;
+  const box = $("#sel-box");
+  ov.hidden = false;
+  box.style.left = pr.left + rect.x * scale + "px";
+  box.style.top = pr.top + rect.y * scale + "px";
+  box.style.width = rect.w * scale + "px";
+  box.style.height = rect.h * scale + "px";
 }
 
 // --- preview fit ------------------------------------------------------------
@@ -555,6 +634,7 @@ async function main() {
   });
 
   initTimelinePointer();
+  ensureSelectionOverlay();
   window.addEventListener("resize", fitPreview);
   requestAnimationFrame(transportLoop);
 

@@ -184,6 +184,18 @@ body {
 }
 .code-field:focus { outline: none; border-color: var(--accent); }
 
+/* Selection overlay (M2b) — floats over the preview; only the box takes pointer events */
+#select-overlay { position: fixed; inset: 0; z-index: 40; pointer-events: none; }
+#select-overlay[hidden] { display: none; }
+.sel-box {
+  position: fixed; pointer-events: auto; cursor: move;
+  border: 2px dashed var(--accent); box-shadow: 0 0 0 1px var(--shadow);
+}
+.sel-resize {
+  position: absolute; right: -7px; bottom: -7px; width: 12px; height: 12px;
+  background: var(--accent); border: 2px solid var(--accent-ink); cursor: nwse-resize;
+}
+
 /* Timeline */
 .timeline {
   height: 196px; flex-shrink: 0; border-top: 2px solid var(--border);

@@ -34,7 +34,8 @@ with a custom-code escape hatch (the "simple code" throughline).
   (pop, fade, slide-in/out, scale) / **custom CSS** / **custom JS**, as a function of
   clip time (deterministic for export). Inspector element panel + click-to-select an
   element in the preview (renderer `setPick`).
-- ⬜ **M2b** — drag-to-reposition/resize elements on a selection-handle overlay.
+- ✅ **M2b** — drag-to-reposition / corner-resize elements on a selection overlay over
+  the preview (renderer `elementRect`; editor maps stage→viewport by the preview scale).
 - ⬜ **M2c** — blank-canvas clips (`type:"canvas"`): start empty, add elements copied
   from any screen (by id) or simple text/box; same override/animation controls.
 

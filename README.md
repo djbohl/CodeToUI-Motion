@@ -102,8 +102,10 @@ Demo document shape:
   mirroring CodeToUI's `create-api.js`), mounted by `server/plugin.js` (Vite dev plugin).
 - `src/ui/` — the browser editor (timeline, preview, inspector) in CodeToUI's visual style.
 
-Planned next: per-element animation (presets + custom CSS/JS) and blank-canvas clips (M2),
-then music + voiceover (M3).
+Element animation (M2): pick an element on a clip's screen, give it a preset entrance
+(pop/fade/slide/scale) or custom CSS/JS, and drag/resize it on the preview overlay.
+Planned next: blank-canvas clips (M2c), then music + voiceover (M3). See
+[docs/roadmap.md](./docs/roadmap.md).
 
 ## Credits
 
