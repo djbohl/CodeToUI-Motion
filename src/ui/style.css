@@ -40,6 +40,8 @@
 
 * { box-sizing: border-box; }
 html, body, #app { height: 100%; margin: 0; }
+/* Off-screen (not display:none) so a programmatic .click() still opens the file dialog. */
+.visually-hidden { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; left: -9999px; }
 body {
   font-family: var(--font-ui);
   background-color: var(--bg);
