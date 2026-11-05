@@ -662,7 +662,7 @@ function renderElementPanel(clip, body) {
   clipElements(clip).forEach((o) => {
     const chip = document.createElement("button");
     chip.className = "override-chip" + (o.elementId === state.selectedElementId ? " active" : "");
-    const label = o.kind ? (o.kind === "text" ? "“" + (o.text || "") + "”" : "box") : o.elementId;
+    const label = o.kind === "text" ? "“" + (o.text || "") + "”" : o.kind === "box" ? "box" : o.kind === "screenEl" ? "⧉ element" : o.elementId;
     chip.textContent = label + (o.animation ? " · " + o.animation.preset : o.hidden ? " · hidden" : "");
     chip.onclick = () => selectElement(clip, o.elementId);
     list.appendChild(chip);
@@ -746,6 +746,8 @@ function renderElementPanel(clip, body) {
   js.oninput = () => { o.js = js.value; markDirty(); };
   body.appendChild(field("Custom JS", js));
 
+  if (!isCanvas) body.appendChild(mkBtn("⧉ Isolate on new canvas", () => isolateOnCanvas(clip, o)));
+
   body.appendChild(mkBtn(clip.type === "canvas" ? "Remove element" : "Remove element override", () => {
     const arr = clipElements(clip);
     const i = arr.indexOf(o);
@@ -776,6 +778,30 @@ function onPickElement(clip, id) {
   }
   selectElement(clip, id);
   markDirty();
+}
+// Copy a picked screen element onto a brand-new canvas clip (its own frame), carrying its
+// markup so the renderer can re-style it with the source screen's CSS — e.g. pull a modal
+// out and make it pop.
+function isolateOnCanvas(clip, o) {
+  const w = $("#preview").contentWindow;
+  const html = w && w.__demo && w.__demo.elementHtml ? w.__demo.elementHtml(o.elementId) : null;
+  if (!html) { setStatus("Couldn't read that element — select it again, then isolate.", "warn"); return; }
+  const id = "ce-" + Math.random().toString(36).slice(2, 8);
+  const el = {
+    elementId: id, kind: "screenEl", sourceScreen: clip.screen, html, hidden: false,
+    x: Math.round(state.demo.size.width / 2), y: Math.round(state.demo.size.height / 2),
+    scale: 1, rotate: 0, animation: { preset: "pop", duration: 400, delay: 0, easing: "ease-out" },
+  };
+  const canvas = {
+    id: "c" + Math.random().toString(36).slice(2, 8), type: "canvas", screen: null,
+    duration: 1500, transitionIn: { type: "dissolve", duration: 300 }, captions: [], elements: [el],
+  };
+  state.demo.clips.splice(state.demo.clips.indexOf(clip) + 1, 0, canvas);
+  state.selectedId = canvas.id;
+  state.selectedElementId = id;
+  renderTimeline(); renderInspector(); markDirty();
+  seekTo(clipStart(canvas.id) + canvas.duration - 1);
+  setStatus("Isolated on a new canvas clip — give it a transition and make it pop.", "ok");
 }
 function addCanvasElement(clip, kind) {
   const id = "ce-" + Math.random().toString(36).slice(2, 8);

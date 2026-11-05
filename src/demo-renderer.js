@@ -23,16 +23,27 @@ const RUNTIME = `
 
   function hEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
   function composeCanvasSrcdoc(clip){
-    var body='';
+    var body='', css='', seen={};
+    // Inject each source screen's global + screen CSS once, so copied elements keep their
+    // styling; then neutralize the body box so absolute positioning stays predictable.
+    (clip.elements||[]).forEach(function(e){
+      if(e.kind==='screenEl' && e.sourceScreen && !seen[e.sourceScreen]){
+        seen[e.sourceScreen]=1; var sc=SCREENS[e.sourceScreen]||{};
+        css+='<style>'+GLOBAL+'</style><style>'+(sc.css||'')+'</style>';
+      }
+    });
+    css+='<style>html,body{margin:0!important;padding:0!important;background:#fff}</style>';
     (clip.elements||[]).forEach(function(e){
       var common='position:absolute;left:0;top:0;transform-origin:center center;';
       if(e.kind==='box'){
         body+='<div data-proto-id="'+e.elementId+'" style="'+common+'width:'+e.w+'px;height:'+e.h+'px;background:'+e.bg+';border-radius:'+e.radius+'px"></div>';
+      } else if(e.kind==='screenEl'){
+        body+='<div data-proto-id="'+e.elementId+'" style="'+common+'">'+(e.html||'')+'</div>';
       } else {
         body+='<div data-proto-id="'+e.elementId+'" style="'+common+'font:600 '+e.fontSize+'px/1.2 system-ui,sans-serif;color:'+e.color+';white-space:pre">'+hEsc(e.text)+'</div>';
       }
     });
-    return '<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;background:#fff}</style></head><body>'+body+'</body></html>';
+    return '<!doctype html><html><head><meta charset="utf-8">'+css+'</head><body>'+body+'</body></html>';
   }
   function srcFor(c){
     return c.type==='canvas' ? composeCanvasSrcdoc(c) : composeScreenSrcdoc(SCREENS, GLOBAL, RT, c.screen);
@@ -206,6 +217,10 @@ const RUNTIME = `
       elementRect:function(id){
         try{ var doc=front.contentDocument; if(!doc) return null; var el=doc.querySelector('[data-proto-id="'+id+'"]'); if(!el) return null;
           var r=el.getBoundingClientRect(); return { x:r.left, y:r.top, w:r.width, h:r.height }; }catch(e){ return null; }
+      },
+      // Outer HTML of an element on the active screen (for copying it onto a canvas clip).
+      elementHtml:function(id){
+        try{ var doc=front.contentDocument; if(!doc) return null; var el=doc.querySelector('[data-proto-id="'+id+'"]'); return el?el.outerHTML:null; }catch(e){ return null; }
       },
       // Live-update from the editor: swap in edited clips (and optionally resize the stage)
       // without reloading the page, then re-apply at the (clamped) current time.

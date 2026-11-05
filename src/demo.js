@@ -142,23 +142,27 @@ function normalizeOverride(o) {
   return out;
 }
 
-export const CANVAS_KINDS = ["text", "box"];
+export const CANVAS_KINDS = ["text", "box", "screenEl"];
 // A canvas element = an override (transform/anim/css/js, positioned by translate x/y from
-// the top-left) plus its own content (text or a box). Gets a stable id if missing.
+// the top-left) plus its own content: text, a box, or an element copied from a screen
+// (screenEl — carries its outerHTML + the source screen name so its CSS can be injected).
 export function normalizeCanvasEl(e) {
   const base = normalizeOverride(e);
   if (!base.elementId) base.elementId = "ce-" + Math.random().toString(36).slice(2, 8);
-  const kind = e.kind === "box" ? "box" : "text";
+  const kind = CANVAS_KINDS.includes(e.kind) ? e.kind : "text";
   const out = { ...base, kind };
   if (kind === "text") {
     out.text = typeof e.text === "string" ? e.text : "Text";
     out.fontSize = num(e.fontSize, 32);
     out.color = typeof e.color === "string" ? e.color : "#111111";
-  } else {
+  } else if (kind === "box") {
     out.w = num(e.w, 160);
     out.h = num(e.h, 100);
     out.bg = typeof e.bg === "string" ? e.bg : "#5b8cff";
     out.radius = num(e.radius, 8);
+  } else { // screenEl
+    out.sourceScreen = typeof e.sourceScreen === "string" ? e.sourceScreen : "";
+    out.html = typeof e.html === "string" ? e.html : "";
   }
   return out;
 }

@@ -100,6 +100,20 @@ test("normalizeDemo builds canvas clips with text/box elements", () => {
   assert.equal(clip.overrides, undefined); // canvas clips carry elements, not overrides
 });
 
+test("normalizeDemo keeps a screenEl canvas element (copied from a screen)", () => {
+  const d = normalizeDemo({
+    clips: [{ type: "canvas", duration: 1500, elements: [
+      { kind: "screenEl", sourceScreen: "Login", html: "<div class='card'>hi</div>", x: 100, y: 200, animation: { preset: "pop" } },
+    ] }],
+  });
+  const el = d.clips[0].elements[0];
+  assert.equal(el.kind, "screenEl");
+  assert.equal(el.sourceScreen, "Login");
+  assert.match(el.html, /card/);
+  assert.equal(el.animation.preset, "pop");
+  assert.ok(el.elementId.startsWith("ce-"));
+});
+
 test("validateDemo rejects a canvas element with a bad kind", async () => {
   const model = await loadPrototype(DEMO);
   assert.throws(

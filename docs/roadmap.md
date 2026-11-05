@@ -58,6 +58,7 @@ with a custom-code escape hatch (the "simple code" throughline).
 - ✅ "Open in Motion" button inside CodeToUI (cross-repo; done + working).
 - ✅ Health-check (`GET /api/ping`, CORS-open) so CodeToUI can warn if Motion isn't
   running before launching (snippet in README hook).
-- ⬜ In-app voiceover recording (MediaRecorder).
-- ⬜ Copy a styled screen element onto a canvas clip.
+- ✅ In-app voiceover recording (MediaRecorder → /api/audio).
+- ✅ Copy a styled screen element onto a canvas clip ("Isolate on new canvas" —
+  carries the element's HTML + the source screen's CSS).
 - ⬜ Device-size presets / orientation in the editor.
