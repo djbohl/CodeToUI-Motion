@@ -426,7 +426,10 @@ async function main() {
   };
   $("#export").onclick = doExport;
   $("#format").onchange = () => {};
-  $("#project-switch").onclick = () => switchProjectPrompt();
+  $("#project-switch").onclick = (e) => { e.stopPropagation(); toggleProjectMenu(); };
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".project-switch-wrap")) $("#project-menu").hidden = true;
+  });
 
   initTimelinePointer();
   window.addEventListener("resize", fitPreview);
@@ -460,15 +463,36 @@ async function main() {
   }
 }
 
-async function switchProjectPrompt() {
+async function toggleProjectMenu() {
+  const menu = $("#project-menu");
+  if (!menu.hidden) { menu.hidden = true; return; }
   try {
     const { projects, active } = await api("/api/projects");
-    const name = prompt("Switch to project:\n" + projects.join(", "), active);
-    if (!name || name === active || !projects.includes(name)) return;
-    await api("/api/projects/active", { method: "POST", headers: jsonHeaders, body: JSON.stringify({ name }) });
-    await loadProject(false, true); // reload preview: different screens embedded
+    menu.innerHTML = "";
+    if (!projects.length) {
+      const empty = document.createElement("div");
+      empty.className = "project-menu-empty";
+      empty.textContent = "No projects found.";
+      menu.appendChild(empty);
+    }
+    projects.forEach((name) => {
+      const b = document.createElement("button");
+      b.className = "project-menu-item" + (name === active ? " active" : "");
+      b.textContent = name;
+      b.onclick = async () => {
+        menu.hidden = true;
+        if (name === active) return;
+        try {
+          await api("/api/projects/active", { method: "POST", headers: jsonHeaders, body: JSON.stringify({ name }) });
+          await loadProject(false, true); // reload preview: different screens embedded
+          setStatus(`Switched to "${name}".`);
+        } catch (e) { setStatus("Switch failed: " + e.message, "error"); }
+      };
+      menu.appendChild(b);
+    });
+    menu.hidden = false;
   } catch (e) {
-    setStatus("Switch failed: " + e.message, "error");
+    setStatus("Couldn't list projects: " + e.message, "error");
   }
 }
 
