@@ -29,11 +29,11 @@ Status legend: ✅ done · 🚧 in progress · ⬜ planned
 Goal: the "pull the modal onto its own frame and make it pop" workflow. Keep it simple,
 with a custom-code escape hatch (the "simple code" throughline).
 
-- 🚧 **M2a** — element overrides on screen clips: data model (`overrides[]` keyed by
+- ✅ **M2a** — element overrides on screen clips: data model (`overrides[]` keyed by
   `data-proto-id`), renderer applies hidden / transform / **preset animation**
   (pop, fade, slide-in/out, scale) / **custom CSS** / **custom JS**, as a function of
   clip time (deterministic for export). Inspector element panel + click-to-select an
-  element in the preview.
+  element in the preview (renderer `setPick`).
 - ⬜ **M2b** — drag-to-reposition/resize elements on a selection-handle overlay.
 - ⬜ **M2c** — blank-canvas clips (`type:"canvas"`): start empty, add elements copied
   from any screen (by id) or simple text/box; same override/animation controls.

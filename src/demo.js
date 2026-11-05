@@ -87,8 +87,36 @@ export function normalizeDemo(demo) {
       at: cap.at >= 0 ? cap.at : 0,
       for: cap.for > 0 ? cap.for : 1000,
     })),
+    overrides: (c.overrides || []).map(normalizeOverride).filter((o) => o.elementId),
   }));
   return { version: 1, fps, size, clips, audio: demo?.audio || [] };
+}
+
+export const ANIM_PRESETS = ["none", "pop", "fade", "scale", "slide-up", "slide-down", "slide-left", "slide-right"];
+const EASINGS = ["linear", "ease", "ease-in", "ease-out", "ease-in-out"];
+const num = (v, d) => (Number.isFinite(Number(v)) ? Number(v) : d);
+
+// One element override on a clip, keyed by the element's stable data-proto-id.
+function normalizeOverride(o) {
+  const out = {
+    elementId: typeof o.elementId === "string" ? o.elementId : "",
+    hidden: !!o.hidden,
+    x: num(o.x, 0),
+    y: num(o.y, 0),
+    scale: num(o.scale, 1),
+    rotate: num(o.rotate, 0),
+  };
+  if (o.animation && ANIM_PRESETS.includes(o.animation.preset) && o.animation.preset !== "none") {
+    out.animation = {
+      preset: o.animation.preset,
+      duration: Math.max(0, num(o.animation.duration, 400)),
+      delay: Math.max(0, num(o.animation.delay, 0)),
+      easing: EASINGS.includes(o.animation.easing) ? o.animation.easing : "ease-out",
+    };
+  }
+  if (typeof o.css === "string" && o.css.trim()) out.css = o.css;
+  if (typeof o.js === "string" && o.js.trim()) out.js = o.js;
+  return out;
 }
 
 /** Validate against the model. Throws on hard errors; returns { warnings }. */
@@ -110,6 +138,9 @@ export function validateDemo(demo, model) {
       if (cap.at + cap.for > c.duration) {
         warnings.push(`${at} caption ${j}: extends past the clip (${cap.at + cap.for}ms > ${c.duration}ms).`);
       }
+    });
+    (c.overrides || []).forEach((o, j) => {
+      if (typeof o.elementId !== "string" || !o.elementId) throw new Error(`${at} override ${j}: needs an elementId.`);
     });
   });
   return { warnings };

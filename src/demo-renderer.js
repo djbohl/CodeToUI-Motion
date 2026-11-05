@@ -16,6 +16,7 @@ const RUNTIME = `
   var front, back, cap;
   var frontClip=null, backClip=null;
   var total=0, _t=0, _playing=false, _raf=null, _last=0;
+  var pickOn=false;
 
   (function(){ var t=0; CLIPS.forEach(function(c){ c._start=t; t+=c.duration; c._end=t; }); total=t; })();
 
@@ -46,6 +47,74 @@ const RUNTIME = `
     var txt=''; (c.captions||[]).forEach(function(k){ if(localT>=k.at && localT<k.at+k['for']) txt=k.text; });
     if(txt){ cap.textContent=txt; cap.style.display='block'; } else { cap.style.display='none'; cap.textContent=''; }
   }
+
+  // --- element overrides (M2a) ----------------------------------------------
+  function ease(p, e){
+    if(e==='linear') return p;
+    if(e==='ease-in') return p*p;
+    if(e==='ease-in-out') return p<0.5 ? 2*p*p : 1-Math.pow(-2*p+2,2)/2;
+    return 1-(1-p)*(1-p); // ease-out (default)
+  }
+  // Rest transform + a time-parameterized entrance animation (deterministic for export).
+  function ovStyle(o, localT){
+    var base='translate('+o.x+'px,'+o.y+'px) scale('+o.scale+') rotate('+o.rotate+'deg)';
+    var opacity='';
+    if(o.animation){
+      var a=o.animation, p;
+      if(localT < a.delay) p=0; else if(localT < a.delay+a.duration) p=(localT-a.delay)/a.duration; else p=1;
+      p=ease(p, a.easing);
+      var pr=a.preset;
+      if(pr==='fade') opacity=String(p);
+      else if(pr==='pop'){ base+=' scale('+(0.6+0.4*p)+')'; opacity=String(p); }
+      else if(pr==='scale') base+=' scale('+p+')';
+      else if(pr==='slide-up') base+=' translateY('+((1-p)*48)+'px)';
+      else if(pr==='slide-down') base+=' translateY('+(-(1-p)*48)+'px)';
+      else if(pr==='slide-left') base+=' translateX('+((1-p)*48)+'px)';
+      else if(pr==='slide-right') base+=' translateX('+(-(1-p)*48)+'px)';
+    }
+    return { transform: base, opacity: opacity };
+  }
+  // One-time per mount: inject custom CSS + run custom JS for a clip's overrides.
+  function prep(iframe, clip){
+    var doc; try{ doc=iframe.contentDocument; }catch(e){ return false; }
+    if(!doc || !doc.body) return false;
+    if(iframe.__c2pPrepped===clip.id) return true;
+    iframe.__c2pPrepped=clip.id;
+    var css=''; (clip.overrides||[]).forEach(function(o){ if(o.css) css+='\\n'+o.css; });
+    if(css){ var st=doc.createElement('style'); st.textContent=css; doc.head.appendChild(st); }
+    (clip.overrides||[]).forEach(function(o){
+      if(!o.js) return;
+      var el=doc.querySelector('[data-proto-id="'+o.elementId+'"]');
+      try{ (new Function('el','document', o.js))(el, doc); }catch(e){}
+    });
+    return true;
+  }
+  // Element pick mode: when on, clicking an element in the active screen reports its
+  // data-proto-id to the editor (same-origin) via window.__demoPickCb.
+  function onPickClick(ev){
+    if(!pickOn) return;
+    var el=ev.target.closest && ev.target.closest('[data-proto-id]');
+    if(el){ ev.preventDefault(); ev.stopPropagation(); if(window.__demoPickCb) window.__demoPickCb(el.getAttribute('data-proto-id')); }
+  }
+  function attachPick(iframe){
+    var doc; try{ doc=iframe.contentDocument; }catch(e){ return; }
+    if(!doc || !doc.body) return;
+    if(!doc.__c2pPick){ doc.__c2pPick=true; doc.addEventListener('click', onPickClick, true); }
+    doc.body.style.cursor = pickOn ? 'crosshair' : '';
+  }
+  function applyOverrides(iframe, clip, localT){
+    if(!clip || !(clip.overrides && clip.overrides.length)) return;
+    if(!prep(iframe, clip)) return;
+    var doc=iframe.contentDocument;
+    clip.overrides.forEach(function(o){
+      var el=doc.querySelector('[data-proto-id="'+o.elementId+'"]'); if(!el) return;
+      if(o.hidden){ el.style.setProperty('display','none','important'); return; }
+      var s=ovStyle(o, localT);
+      el.style.setProperty('transform', s.transform, 'important');
+      el.style.setProperty('transform-origin','center center');
+      if(s.opacity!=='') el.style.setProperty('opacity', s.opacity, 'important');
+    });
+  }
   function applyAt(t){
     if(!CLIPS.length){ front.removeAttribute('srcdoc'); back.style.display='none'; cap.style.display='none'; _t=0; return; }
     t=Math.max(0, Math.min(t, total)); _t=t;
@@ -54,14 +123,18 @@ const RUNTIME = `
     var tr=c.transitionIn||{type:'instant',duration:0};
     var inTransition = i>0 && tr.duration>0 && tr.type!=='instant' && localT < tr.duration;
     if(inTransition){
-      mountBack(CLIPS[i-1]);
+      var prev=CLIPS[i-1];
+      mountBack(prev);
       back.style.display='block'; back.style.opacity='1'; back.style.transform='none'; back.style.zIndex='1';
       front.style.zIndex='2';
       setTransform(front, tr.type, localT/tr.duration);
+      applyOverrides(back, prev, prev.duration); // outgoing clip settled at its end state
     } else {
       back.style.display='none';
       front.style.zIndex='2'; front.style.opacity='1'; front.style.transform='none';
     }
+    applyOverrides(front, c, localT);
+    attachPick(front);
     renderCaptions(c, localT);
   }
   function tick(now){
@@ -81,6 +154,7 @@ const RUNTIME = `
       playing:function(){return _playing;},
       seek:function(t){ pause(); applyAt(t); },
       play:play, pause:pause,
+      setPick:function(on){ pickOn=!!on; try{ if(front&&front.contentDocument&&front.contentDocument.body) front.contentDocument.body.style.cursor = pickOn?'crosshair':''; }catch(e){} },
       // Live-update from the editor: swap in edited clips (and optionally resize the stage)
       // without reloading the page, then re-apply at the (clamped) current time.
       load:function(clips, size){

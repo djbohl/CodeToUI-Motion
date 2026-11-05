@@ -10,6 +10,8 @@ import { initPet } from "./pet.js";
 
 const $ = (s) => document.querySelector(s);
 const PPS = 90; // timeline pixels per second
+const ANIM_PRESETS = ["none", "pop", "fade", "scale", "slide-up", "slide-down", "slide-left", "slide-right"];
+const EASINGS = ["ease-out", "ease-in", "ease-in-out", "linear", "ease"];
 let pet = null;
 let everPlayed = false;
 const TRANSITIONS = ["instant", "dissolve", "slide-left", "slide-right", "slide-up", "slide-down"];
@@ -19,6 +21,7 @@ const state = {
   screens: [],
   demo: { version: 1, fps: 30, size: { width: 390, height: 844 }, clips: [], audio: [] },
   selectedId: null,
+  selectedElementId: null,
 };
 
 // --- REST -------------------------------------------------------------------
@@ -282,6 +285,10 @@ function renderInspector() {
   const c = selectedClip();
   body.innerHTML = "";
   if (!c) { body.innerHTML = '<p class="inspector-empty">Select a clip in the timeline.</p>'; return; }
+  // Drop a stale element selection that doesn't belong to this clip.
+  if (state.selectedElementId && !(c.overrides || []).some((o) => o.elementId === state.selectedElementId)) {
+    state.selectedElementId = null;
+  }
 
   // Screen
   const scr = document.createElement("select");
@@ -325,6 +332,8 @@ function renderInspector() {
   addCap.onclick = () => { (c.captions ||= []).push({ text: "Caption", at: 0, for: Math.min(1200, c.duration) }); renderInspector(); markDirty(); };
   body.appendChild(addCap);
 
+  if (c.type === "screen") renderElementPanel(c, body);
+
   // Clip actions
   const actions = document.createElement("div");
   actions.className = "inspector-actions";
@@ -356,6 +365,120 @@ function mkBtn(label, onClick) {
   const b = document.createElement("button");
   b.className = "topbar-btn"; b.textContent = label; b.onclick = onClick;
   return b;
+}
+
+// --- element overrides (M2a) ------------------------------------------------
+function selectedOverride(c) {
+  return (c.overrides || []).find((o) => o.elementId === state.selectedElementId) || null;
+}
+function renderElementPanel(clip, body) {
+  const title = document.createElement("div");
+  title.className = "inspector-subtitle";
+  title.textContent = "Elements";
+  body.appendChild(title);
+
+  // Pick an element on the screen to animate it.
+  const pickBtn = document.createElement("button");
+  pickBtn.className = "topbar-btn btn-wide";
+  pickBtn.textContent = "✛ Pick element on screen";
+  pickBtn.onclick = () => startPick(clip);
+  body.appendChild(pickBtn);
+
+  // Existing overrides for this clip.
+  const list = document.createElement("div");
+  list.className = "override-list";
+  (clip.overrides || []).forEach((o) => {
+    const chip = document.createElement("button");
+    chip.className = "override-chip" + (o.elementId === state.selectedElementId ? " active" : "");
+    chip.textContent = o.elementId + (o.animation ? " · " + o.animation.preset : o.hidden ? " · hidden" : "");
+    chip.onclick = () => { state.selectedElementId = o.elementId; renderInspector(); };
+    list.appendChild(chip);
+  });
+  body.appendChild(list);
+
+  const o = selectedOverride(clip);
+  if (!o) return;
+
+  // Controls for the selected element override.
+  const hidden = document.createElement("input");
+  hidden.type = "checkbox"; hidden.checked = !!o.hidden;
+  hidden.onchange = () => { o.hidden = hidden.checked; markDirty(); };
+  const hidWrap = document.createElement("label");
+  hidWrap.className = "field checkbox-field";
+  hidWrap.append(hidden, document.createTextNode(" Hidden"));
+  body.appendChild(hidWrap);
+
+  // Animation preset
+  const preset = document.createElement("select");
+  ANIM_PRESETS.forEach((p) => { const op = document.createElement("option"); op.value = p; op.textContent = p; op.selected = (o.animation?.preset || "none") === p; preset.appendChild(op); });
+  preset.onchange = () => {
+    if (preset.value === "none") delete o.animation;
+    else o.animation = { preset: preset.value, duration: o.animation?.duration ?? 400, delay: o.animation?.delay ?? 0, easing: o.animation?.easing ?? "ease-out" };
+    markDirty(); renderInspector();
+  };
+  body.appendChild(field("Animation", preset));
+
+  if (o.animation) {
+    body.appendChild(field("Duration (ms)", numberInput(o.animation.duration, (v) => { o.animation.duration = Math.max(0, v || 0); markDirty(); }, 0, 20000, 50)));
+    body.appendChild(field("Delay (ms)", numberInput(o.animation.delay, (v) => { o.animation.delay = Math.max(0, v || 0); markDirty(); }, 0, 20000, 50)));
+    const eas = document.createElement("select");
+    EASINGS.forEach((e) => { const op = document.createElement("option"); op.value = e; op.textContent = e; op.selected = o.animation.easing === e; eas.appendChild(op); });
+    eas.onchange = () => { o.animation.easing = eas.value; markDirty(); };
+    body.appendChild(field("Easing", eas));
+  }
+
+  // Position / transform
+  const pos = document.createElement("div");
+  pos.className = "xy-grid";
+  pos.append(
+    field("X", numberInput(o.x, (v) => { o.x = v || 0; markDirty(); }, -5000, 5000, 1)),
+    field("Y", numberInput(o.y, (v) => { o.y = v || 0; markDirty(); }, -5000, 5000, 1)),
+    field("Scale", numberInput(o.scale, (v) => { o.scale = v || 1; markDirty(); }, 0, 10, 0.05)),
+    field("Rotate°", numberInput(o.rotate, (v) => { o.rotate = v || 0; markDirty(); }, -360, 360, 1))
+  );
+  body.appendChild(pos);
+
+  // Custom CSS / JS escape hatch
+  const css = document.createElement("textarea");
+  css.className = "code-field"; css.rows = 3; css.placeholder = "custom CSS (applies to this clip's screen)";
+  css.value = o.css || "";
+  css.oninput = () => { o.css = css.value; markDirty(); };
+  body.appendChild(field("Custom CSS", css));
+  const js = document.createElement("textarea");
+  js.className = "code-field"; js.rows = 3; js.placeholder = "custom JS — `el` = the element, `document` = the screen";
+  js.value = o.js || "";
+  js.oninput = () => { o.js = js.value; markDirty(); };
+  body.appendChild(field("Custom JS", js));
+
+  body.appendChild(mkBtn("Remove element override", () => {
+    clip.overrides = clip.overrides.filter((x) => x !== o);
+    state.selectedElementId = null;
+    renderInspector(); markDirty();
+  }));
+}
+
+function startPick(clip) {
+  const w = $("#preview").contentWindow;
+  if (!w || !w.__demo) { setStatus("Preview not ready yet.", "warn"); return; }
+  playing = false;
+  seekTo(clipStart(clip.id)); // show this clip's screen in the preview
+  w.__demoPickCb = (id) => {
+    onPickElement(clip, id);
+    w.__demo.setPick(false);
+    w.__demoPickCb = null;
+    setStatus("");
+  };
+  w.__demo.setPick(true);
+  setStatus("Click an element in the preview to animate it…");
+}
+function onPickElement(clip, id) {
+  clip.overrides = clip.overrides || [];
+  if (!clip.overrides.find((o) => o.elementId === id)) {
+    clip.overrides.push({ elementId: id, hidden: false, x: 0, y: 0, scale: 1, rotate: 0, animation: { preset: "pop", duration: 400, delay: 0, easing: "ease-out" } });
+  }
+  state.selectedElementId = id;
+  renderInspector();
+  markDirty();
 }
 
 // --- preview fit ------------------------------------------------------------
