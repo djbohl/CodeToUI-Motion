@@ -64,11 +64,28 @@ async function reloadPreview() {
   fitPreview();
 }
 
-// --- autosave ---------------------------------------------------------------
+// --- autosave + undo --------------------------------------------------------
 let saveTimer = null;
+let undoStack = [];
+let lastSnapshot = null; // JSON of the last committed demo; the undo baseline
+function resetHistory() {
+  undoStack = [];
+  lastSnapshot = JSON.stringify(state.demo);
+}
 function scheduleSave() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(save, 600);
+}
+function undo() {
+  if (!undoStack.length) { setStatus("Nothing to undo.", "warn"); return; }
+  const prev = undoStack.pop();
+  state.demo = JSON.parse(prev);
+  lastSnapshot = prev;
+  if (!state.demo.clips.some((c) => c.id === state.selectedId)) state.selectedId = state.demo.clips[0]?.id || null;
+  state.selectedElementId = null;
+  renderTimeline(); renderInspector(); pushToRenderer(); fitPreview();
+  scheduleSave();
+  setStatus("Undone.");
 }
 // Structural/content change: remount the renderer + redraw the timeline.
 function markDirty() {
@@ -83,6 +100,13 @@ function markDirtyLive() {
   scheduleSave();
 }
 async function save() {
+  // Record one undo step per settled edit burst (not per keystroke/drag frame).
+  const cur = JSON.stringify(state.demo);
+  if (lastSnapshot != null && cur !== lastSnapshot) {
+    undoStack.push(lastSnapshot);
+    if (undoStack.length > 50) undoStack.shift();
+    lastSnapshot = cur;
+  }
   try {
     const { warnings } = await api("/api/demo", { method: "POST", headers: jsonHeaders, body: JSON.stringify({ demo: state.demo }) });
     setStatus(warnings?.length ? "Saved · " + warnings.join(" ") : "Saved.", warnings?.length ? "warn" : "ok");
@@ -691,6 +715,7 @@ async function loadProject(fresh = false, reload = false) {
   state.screens = data.screens;
   state.demo = data.demo;
   state.selectedId = state.demo.clips[0]?.id || null;
+  resetHistory();
   $("#current-project").textContent = state.project;
   renderPalette();
   renderTimeline();
@@ -724,6 +749,15 @@ async function main() {
   initTimelinePointer();
   ensureSelectionOverlay();
   window.addEventListener("resize", fitPreview);
+  // Undo (Cmd/Ctrl+Z) — but let text fields keep their native undo.
+  window.addEventListener("keydown", (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z" && !e.shiftKey) {
+      const tag = (e.target.tagName || "").toLowerCase();
+      if (tag === "input" || tag === "textarea") return;
+      e.preventDefault();
+      undo();
+    }
+  });
   requestAnimationFrame(transportLoop);
 
   // Pet handoff: CodeToUI can pass its pet in ?pet=<encoded JSON of the pets array>;

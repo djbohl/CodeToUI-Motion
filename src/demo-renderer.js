@@ -124,6 +124,7 @@ const RUNTIME = `
     list.forEach(function(o){
       var el=doc.querySelector('[data-proto-id="'+o.elementId+'"]'); if(!el) return;
       if(o.hidden){ el.style.setProperty('display','none','important'); return; }
+      el.style.removeProperty('display'); // un-hide: clear any display:none we set earlier
       var s=ovStyle(o, localT);
       el.style.setProperty('transform', s.transform, 'important');
       el.style.setProperty('transform-origin','center center');
