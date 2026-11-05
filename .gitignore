@@ -1,0 +1,17 @@
+# deps
+node_modules/
+
+# render output + scratch frames
+*.mp4
+*.webm
+*.walkthrough.json
+c2p-frames-*/
+
+# OS / editor
+.DS_Store
+*.log
+
+# private/planning docs (ALL-CAPS at repo root) — per CLAUDE.md
+/PLAN.md
+/COLLABORATION.md
+/NOTES.md

@@ -1,0 +1,19 @@
+{
+  "name": "codetoprototype",
+  "version": "0.1.0",
+  "description": "Turn a CodeToUI click-through prototype into a walkthrough video (MP4/WebM) with light editing (trim, speed, captions).",
+  "type": "module",
+  "bin": {
+    "codetoprototype": "src/cli.js"
+  },
+  "scripts": {
+    "render": "node src/cli.js render",
+    "plan": "node src/cli.js plan",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "ffmpeg-static": "^5.2.0",
+    "puppeteer": "^25.16.0"
+  },
+  "license": "MIT"
+}
