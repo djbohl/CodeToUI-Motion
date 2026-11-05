@@ -53,8 +53,10 @@ with a custom-code escape hatch (the "simple code" throughline).
 
 ## Later / stretch
 
-- ⬜ Electron shell (double-click app; opt-in deps like CodeToUI's `app:setup`) — makes
-  "is it running?" a non-issue.
-- ⬜ "Open in Motion" button inside CodeToUI (cross-repo; see README hook).
+- ✅ Electron shell (double-click app; opt-in deps via `app:setup`, tiny built-in static
+  server, shares CodeToUI's Documents projects root on :5920).
+- ✅ "Open in Motion" button inside CodeToUI (cross-repo; done + working).
 - ⬜ Health-check so CodeToUI can tell the user if Motion isn't running.
+- ⬜ In-app voiceover recording (MediaRecorder).
+- ⬜ Copy a styled screen element onto a canvas clip.
 - ⬜ Device-size presets / orientation in the editor.

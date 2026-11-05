@@ -40,6 +40,20 @@ C2P_PROJECTS_ROOT=../code-design/projects npm run dev
 
 Edits autosave to **`proto.demo.json`** inside the project folder (disk truth).
 
+### Desktop app (optional)
+
+A packaged desktop build so you don't need a terminal running. Electron and
+electron-builder are **opt-in** (not in dependencies):
+
+```bash
+npm run app:setup        # installs electron + electron-builder (--no-save)
+npm run electron         # build the client + launch the desktop app
+npm run app:build:mac    # or app:build:win — produces an installer in release/
+```
+
+The desktop app serves the editor on `127.0.0.1:5920` and shares CodeToUI's desktop
+projects root (`~/Documents/CodeToUI Playground`), so both apps work off one folder.
+
 ### Launch from CodeToUI (ready-to-apply hook)
 
 CodeToUI reserves a disabled **Video** button in its Export modal (`index.html`, "in the

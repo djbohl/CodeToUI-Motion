@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "CodeToUI Motion — turn a CodeToUI prototype into a demo video (MP4/WebM): a timeline of clips with transitions, captions, and the screens' own animations.",
   "type": "module",
+  "main": "electron/main.js",
   "bin": {
     "codetoprototype": "src/cli.js"
   },
@@ -11,7 +12,12 @@
     "build": "vite build",
     "render": "node src/cli.js render",
     "plan": "node src/cli.js plan",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "app:setup": "npm install --no-save electron@^45.2.3 electron-builder@^26.18.0",
+    "electron": "npm run build && electron .",
+    "app:build": "npm run build && electron-builder",
+    "app:build:mac": "npm run build && electron-builder --mac",
+    "app:build:win": "npm run build && electron-builder --win"
   },
   "dependencies": {
     "ffmpeg-static": "^5.2.0",
@@ -19,6 +25,15 @@
   },
   "devDependencies": {
     "vite": "^7.1.0"
+  },
+  "build": {
+    "appId": "com.donnajobohl.codetouimotion",
+    "productName": "CodeToUI Motion",
+    "directories": { "output": "release" },
+    "files": ["electron/**", "server/**", "src/**", "package.json"],
+    "extraResources": [{ "from": "dist", "to": "dist" }],
+    "mac": { "category": "public.app-category.developer-tools", "target": ["dmg", "zip"] },
+    "win": { "target": ["nsis"] }
   },
   "license": "CC-BY-NC-4.0"
 }

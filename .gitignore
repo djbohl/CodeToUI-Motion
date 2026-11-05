@@ -1,6 +1,10 @@
 # deps
 node_modules/
 
+# build output
+dist/
+release/
+
 # render output + scratch frames
 *.mp4
 *.webm
