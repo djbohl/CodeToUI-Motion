@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CodeToPrototype</title>
+    <link rel="stylesheet" href="/src/ui/style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">CodeToPrototype</div>
+      <label class="field">
+        Project
+        <select id="project-picker"></select>
+      </label>
+      <div class="spacer"></div>
+      <label class="field">Format
+        <select id="opt-format"><option value="mp4">MP4</option><option value="webm">WebM</option></select>
+      </label>
+      <label class="field">FPS <input id="opt-fps" type="number" min="1" max="60" value="30" /></label>
+      <label class="field">Width <input id="opt-width" type="number" min="100" max="3000" value="390" /></label>
+      <label class="field checkbox"><input id="opt-cursor" type="checkbox" checked /> Cursor</label>
+      <button id="btn-play" class="btn">▶ Play preview</button>
+      <button id="btn-save" class="btn">Save</button>
+      <button id="btn-render" class="btn btn-primary">⬇ Render</button>
+    </header>
+
+    <main class="editor">
+      <div class="editor-head">
+        <h1 id="steps-title">Walkthrough</h1>
+        <div class="editor-actions">
+          <button id="btn-add" class="btn btn-small">+ Add step</button>
+          <button id="btn-regen" class="btn btn-small">↻ Regenerate auto-walk</button>
+        </div>
+      </div>
+      <div id="steps"></div>
+      <p id="status" class="status" role="status"></p>
+    </main>
+
+    <div id="preview-overlay" class="overlay" hidden>
+      <div class="overlay-bar">
+        <span id="preview-title">Preview</span>
+        <button id="preview-close" class="btn btn-small">Close</button>
+      </div>
+      <iframe id="preview-frame" title="Prototype preview"></iframe>
+    </div>
+
+    <script type="module" src="/src/ui/main.js"></script>
+  </body>
+</html>

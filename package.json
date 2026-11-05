@@ -7,6 +7,8 @@
     "codetoprototype": "src/cli.js"
   },
   "scripts": {
+    "dev": "vite",
+    "build": "vite build",
     "render": "node src/cli.js render",
     "plan": "node src/cli.js plan",
     "test": "node --test test/*.test.js"
@@ -15,5 +17,8 @@
     "ffmpeg-static": "^5.2.0",
     "puppeteer": "^25.16.0"
   },
-  "license": "MIT"
+  "devDependencies": {
+    "vite": "^7.1.0"
+  },
+  "license": "CC-BY-NC-4.0"
 }
