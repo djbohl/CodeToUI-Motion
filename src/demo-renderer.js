@@ -20,11 +20,23 @@ const RUNTIME = `
 
   (function(){ var t=0; CLIPS.forEach(function(c){ c._start=t; t+=c.duration; c._end=t; }); total=t; })();
 
-  function srcFor(c){
-    return c.type==='screen'
-      ? composeScreenSrcdoc(SCREENS, GLOBAL, RT, c.screen)
-      : '<!doctype html><html><body style="margin:0;background:#fff"></body></html>';
+  function hEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function composeCanvasSrcdoc(clip){
+    var body='';
+    (clip.elements||[]).forEach(function(e){
+      var common='position:absolute;left:0;top:0;transform-origin:center center;';
+      if(e.kind==='box'){
+        body+='<div data-proto-id="'+e.elementId+'" style="'+common+'width:'+e.w+'px;height:'+e.h+'px;background:'+e.bg+';border-radius:'+e.radius+'px"></div>';
+      } else {
+        body+='<div data-proto-id="'+e.elementId+'" style="'+common+'font:600 '+e.fontSize+'px/1.2 system-ui,sans-serif;color:'+e.color+';white-space:pre">'+hEsc(e.text)+'</div>';
+      }
+    });
+    return '<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;background:#fff}</style></head><body>'+body+'</body></html>';
   }
+  function srcFor(c){
+    return c.type==='canvas' ? composeCanvasSrcdoc(c) : composeScreenSrcdoc(SCREENS, GLOBAL, RT, c.screen);
+  }
+  function ovList(clip){ return (clip.type==='canvas' ? clip.elements : clip.overrides) || []; }
   function mountFront(c){ if(frontClip!==c.id){ front.srcdoc=srcFor(c); frontClip=c.id; } }
   function mountBack(c){ if(backClip!==c.id){ back.srcdoc=srcFor(c); backClip=c.id; } }
 
@@ -80,9 +92,10 @@ const RUNTIME = `
     if(!doc || !doc.body) return false;
     if(iframe.__c2pPrepped===clip.id) return true;
     iframe.__c2pPrepped=clip.id;
-    var css=''; (clip.overrides||[]).forEach(function(o){ if(o.css) css+='\\n'+o.css; });
+    var list=ovList(clip);
+    var css=''; list.forEach(function(o){ if(o.css) css+='\\n'+o.css; });
     if(css){ var st=doc.createElement('style'); st.textContent=css; doc.head.appendChild(st); }
-    (clip.overrides||[]).forEach(function(o){
+    list.forEach(function(o){
       if(!o.js) return;
       var el=doc.querySelector('[data-proto-id="'+o.elementId+'"]');
       try{ (new Function('el','document', o.js))(el, doc); }catch(e){}
@@ -103,10 +116,12 @@ const RUNTIME = `
     doc.body.style.cursor = pickOn ? 'crosshair' : '';
   }
   function applyOverrides(iframe, clip, localT){
-    if(!clip || !(clip.overrides && clip.overrides.length)) return;
+    if(!clip) return;
+    var list=ovList(clip);
+    if(!list.length) return;
     if(!prep(iframe, clip)) return;
     var doc=iframe.contentDocument;
-    clip.overrides.forEach(function(o){
+    list.forEach(function(o){
       var el=doc.querySelector('[data-proto-id="'+o.elementId+'"]'); if(!el) return;
       if(o.hidden){ el.style.setProperty('display','none','important'); return; }
       var s=ovStyle(o, localT);
@@ -154,6 +169,9 @@ const RUNTIME = `
       playing:function(){return _playing;},
       seek:function(t){ pause(); applyAt(t); },
       play:play, pause:pause,
+      // Re-apply overrides at the current time WITHOUT remounting (the editor shares the
+      // same clip objects by reference, so mutating x/y/scale/anim shows up immediately).
+      refresh:function(){ applyAt(_t); },
       setPick:function(on){ pickOn=!!on; try{ if(front&&front.contentDocument&&front.contentDocument.body) front.contentDocument.body.style.cursor = pickOn?'crosshair':''; }catch(e){} },
       // Bounding box of an element in stage coordinates (the front iframe fills the
       // stage at 0,0), so the editor can draw a selection overlay over it.

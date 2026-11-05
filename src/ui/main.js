@@ -66,11 +66,21 @@ async function reloadPreview() {
 
 // --- autosave ---------------------------------------------------------------
 let saveTimer = null;
+function scheduleSave() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(save, 600);
+}
+// Structural/content change: remount the renderer + redraw the timeline.
 function markDirty() {
   pushToRenderer();
   renderTimeline();
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(save, 600);
+  scheduleSave();
+}
+// Live tweak (transform/animation/hidden): re-apply in place, no remount, no flicker.
+function markDirtyLive() {
+  const r = renderer();
+  if (r && r.refresh) r.refresh();
+  scheduleSave();
 }
 async function save() {
   try {
@@ -106,6 +116,28 @@ function addClip(screen) {
   markDirty();
   pet?.react("clipAdded");
 }
+function addCanvasClip() {
+  const c = {
+    id: "c" + Math.random().toString(36).slice(2, 8),
+    type: "canvas",
+    screen: null,
+    duration: 2000,
+    transitionIn: { type: "instant", duration: 0 },
+    captions: [],
+    elements: [],
+  };
+  state.demo.clips.push(c);
+  state.selectedId = c.id;
+  state.selectedElementId = null;
+  renderInspector();
+  markDirty();
+  pet?.react("clipAdded");
+}
+// The animatable items on a clip: element overrides (screen) or canvas elements.
+function clipElements(c) {
+  if (c.type === "canvas") return (c.elements ||= []);
+  return (c.overrides ||= []);
+}
 
 // --- palette ----------------------------------------------------------------
 function renderPalette() {
@@ -118,6 +150,13 @@ function renderPalette() {
     li.onclick = () => addClip(name);
     ul.appendChild(li);
   });
+  const canvasBtn = document.createElement("button");
+  canvasBtn.className = "topbar-btn btn-wide";
+  canvasBtn.textContent = "+ Blank canvas";
+  canvasBtn.title = "Add a blank-canvas clip (title card, callout, etc.)";
+  canvasBtn.style.marginTop = "8px";
+  canvasBtn.onclick = addCanvasClip;
+  ul.appendChild(canvasBtn); // inside #screen-palette so re-render clears it too
 }
 
 // --- timeline ---------------------------------------------------------------
@@ -287,15 +326,22 @@ function renderInspector() {
   body.innerHTML = "";
   if (!c) { body.innerHTML = '<p class="inspector-empty">Select a clip in the timeline.</p>'; return; }
   // Drop a stale element selection that doesn't belong to this clip.
-  if (state.selectedElementId && !(c.overrides || []).some((o) => o.elementId === state.selectedElementId)) {
+  if (state.selectedElementId && !clipElements(c).some((o) => o.elementId === state.selectedElementId)) {
     state.selectedElementId = null;
   }
 
-  // Screen
-  const scr = document.createElement("select");
-  state.screens.forEach((n) => { const o = document.createElement("option"); o.value = n; o.textContent = n; o.selected = n === c.screen; scr.appendChild(o); });
-  scr.onchange = () => { c.screen = scr.value; markDirty(); };
-  body.appendChild(field("Screen", scr));
+  // Clip type badge / screen picker
+  if (c.type === "canvas") {
+    const badge = document.createElement("div");
+    badge.className = "inspector-subtitle";
+    badge.textContent = "Blank canvas";
+    body.appendChild(badge);
+  } else {
+    const scr = document.createElement("select");
+    state.screens.forEach((n) => { const o = document.createElement("option"); o.value = n; o.textContent = n; o.selected = n === c.screen; scr.appendChild(o); });
+    scr.onchange = () => { c.screen = scr.value; markDirty(); };
+    body.appendChild(field("Screen", scr));
+  }
 
   // Duration
   const dur = document.createElement("input");
@@ -333,7 +379,7 @@ function renderInspector() {
   addCap.onclick = () => { (c.captions ||= []).push({ text: "Caption", at: 0, for: Math.min(1200, c.duration) }); renderInspector(); markDirty(); };
   body.appendChild(addCap);
 
-  if (c.type === "screen") renderElementPanel(c, body);
+  renderElementPanel(c, body);
 
   // Clip actions
   const actions = document.createElement("div");
@@ -368,30 +414,38 @@ function mkBtn(label, onClick) {
   return b;
 }
 
-// --- element overrides (M2a) ------------------------------------------------
+// --- element overrides (M2a) / canvas elements (M2c) ------------------------
 function selectedOverride(c) {
-  return (c.overrides || []).find((o) => o.elementId === state.selectedElementId) || null;
+  return clipElements(c).find((o) => o.elementId === state.selectedElementId) || null;
 }
 function renderElementPanel(clip, body) {
+  const isCanvas = clip.type === "canvas";
   const title = document.createElement("div");
   title.className = "inspector-subtitle";
   title.textContent = "Elements";
   body.appendChild(title);
 
-  // Pick an element on the screen to animate it.
-  const pickBtn = document.createElement("button");
-  pickBtn.className = "topbar-btn btn-wide";
-  pickBtn.textContent = "✛ Pick element on screen";
-  pickBtn.onclick = () => startPick(clip);
-  body.appendChild(pickBtn);
+  if (isCanvas) {
+    const row = document.createElement("div");
+    row.className = "inspector-actions";
+    row.append(mkBtn("+ Text", () => addCanvasElement(clip, "text")), mkBtn("+ Box", () => addCanvasElement(clip, "box")));
+    body.appendChild(row);
+  } else {
+    const pickBtn = document.createElement("button");
+    pickBtn.className = "topbar-btn btn-wide";
+    pickBtn.textContent = "✛ Pick element on screen";
+    pickBtn.onclick = () => startPick(clip);
+    body.appendChild(pickBtn);
+  }
 
-  // Existing overrides for this clip.
+  // Existing elements/overrides for this clip.
   const list = document.createElement("div");
   list.className = "override-list";
-  (clip.overrides || []).forEach((o) => {
+  clipElements(clip).forEach((o) => {
     const chip = document.createElement("button");
     chip.className = "override-chip" + (o.elementId === state.selectedElementId ? " active" : "");
-    chip.textContent = o.elementId + (o.animation ? " · " + o.animation.preset : o.hidden ? " · hidden" : "");
+    const label = o.kind ? (o.kind === "text" ? "“" + (o.text || "") + "”" : "box") : o.elementId;
+    chip.textContent = label + (o.animation ? " · " + o.animation.preset : o.hidden ? " · hidden" : "");
     chip.onclick = () => selectElement(clip, o.elementId);
     list.appendChild(chip);
   });
@@ -400,10 +454,33 @@ function renderElementPanel(clip, body) {
   const o = selectedOverride(clip);
   if (!o) return;
 
+  // Canvas element content controls.
+  if (isCanvas && o.kind === "text") {
+    const txt = document.createElement("input");
+    txt.type = "text"; txt.value = o.text || "";
+    txt.oninput = () => { o.text = txt.value; markDirty(); };
+    body.appendChild(field("Text", txt));
+    body.appendChild(field("Font size", numberInput(o.fontSize, (v) => { o.fontSize = Math.max(4, v || 16); markDirty(); }, 4, 400, 1)));
+    const col = document.createElement("input"); col.type = "color"; col.value = o.color || "#111111";
+    col.oninput = () => { o.color = col.value; markDirty(); };
+    body.appendChild(field("Color", col));
+  } else if (isCanvas && o.kind === "box") {
+    const wh = document.createElement("div"); wh.className = "xy-grid";
+    wh.append(
+      field("Width", numberInput(o.w, (v) => { o.w = Math.max(1, v || 1); markDirty(); }, 1, 5000, 1)),
+      field("Height", numberInput(o.h, (v) => { o.h = Math.max(1, v || 1); markDirty(); }, 1, 5000, 1)),
+      field("Radius", numberInput(o.radius, (v) => { o.radius = Math.max(0, v || 0); markDirty(); }, 0, 999, 1))
+    );
+    body.appendChild(wh);
+    const bg = document.createElement("input"); bg.type = "color"; bg.value = o.bg || "#5b8cff";
+    bg.oninput = () => { o.bg = bg.value; markDirty(); };
+    body.appendChild(field("Background", bg));
+  }
+
   // Controls for the selected element override.
   const hidden = document.createElement("input");
   hidden.type = "checkbox"; hidden.checked = !!o.hidden;
-  hidden.onchange = () => { o.hidden = hidden.checked; markDirty(); };
+  hidden.onchange = () => { o.hidden = hidden.checked; markDirtyLive(); };
   const hidWrap = document.createElement("label");
   hidWrap.className = "field checkbox-field";
   hidWrap.append(hidden, document.createTextNode(" Hidden"));
@@ -415,16 +492,16 @@ function renderElementPanel(clip, body) {
   preset.onchange = () => {
     if (preset.value === "none") delete o.animation;
     else o.animation = { preset: preset.value, duration: o.animation?.duration ?? 400, delay: o.animation?.delay ?? 0, easing: o.animation?.easing ?? "ease-out" };
-    markDirty(); renderInspector();
+    markDirtyLive(); renderInspector();
   };
   body.appendChild(field("Animation", preset));
 
   if (o.animation) {
-    body.appendChild(field("Duration (ms)", numberInput(o.animation.duration, (v) => { o.animation.duration = Math.max(0, v || 0); markDirty(); }, 0, 20000, 50)));
-    body.appendChild(field("Delay (ms)", numberInput(o.animation.delay, (v) => { o.animation.delay = Math.max(0, v || 0); markDirty(); }, 0, 20000, 50)));
+    body.appendChild(field("Duration (ms)", numberInput(o.animation.duration, (v) => { o.animation.duration = Math.max(0, v || 0); markDirtyLive(); }, 0, 20000, 50)));
+    body.appendChild(field("Delay (ms)", numberInput(o.animation.delay, (v) => { o.animation.delay = Math.max(0, v || 0); markDirtyLive(); }, 0, 20000, 50)));
     const eas = document.createElement("select");
     EASINGS.forEach((e) => { const op = document.createElement("option"); op.value = e; op.textContent = e; op.selected = o.animation.easing === e; eas.appendChild(op); });
-    eas.onchange = () => { o.animation.easing = eas.value; markDirty(); };
+    eas.onchange = () => { o.animation.easing = eas.value; markDirtyLive(); };
     body.appendChild(field("Easing", eas));
   }
 
@@ -432,10 +509,10 @@ function renderElementPanel(clip, body) {
   const pos = document.createElement("div");
   pos.className = "xy-grid";
   pos.append(
-    field("X", numberInput(o.x, (v) => { o.x = v || 0; markDirty(); }, -5000, 5000, 1)),
-    field("Y", numberInput(o.y, (v) => { o.y = v || 0; markDirty(); }, -5000, 5000, 1)),
-    field("Scale", numberInput(o.scale, (v) => { o.scale = v || 1; markDirty(); }, 0, 10, 0.05)),
-    field("Rotate°", numberInput(o.rotate, (v) => { o.rotate = v || 0; markDirty(); }, -360, 360, 1))
+    field("X", numberInput(o.x, (v) => { o.x = v || 0; markDirtyLive(); }, -5000, 5000, 1)),
+    field("Y", numberInput(o.y, (v) => { o.y = v || 0; markDirtyLive(); }, -5000, 5000, 1)),
+    field("Scale", numberInput(o.scale, (v) => { o.scale = v || 1; markDirtyLive(); }, 0, 10, 0.05)),
+    field("Rotate°", numberInput(o.rotate, (v) => { o.rotate = v || 0; markDirtyLive(); }, -360, 360, 1))
   );
   body.appendChild(pos);
 
@@ -451,8 +528,10 @@ function renderElementPanel(clip, body) {
   js.oninput = () => { o.js = js.value; markDirty(); };
   body.appendChild(field("Custom JS", js));
 
-  body.appendChild(mkBtn("Remove element override", () => {
-    clip.overrides = clip.overrides.filter((x) => x !== o);
+  body.appendChild(mkBtn(clip.type === "canvas" ? "Remove element" : "Remove element override", () => {
+    const arr = clipElements(clip);
+    const i = arr.indexOf(o);
+    if (i >= 0) arr.splice(i, 1);
     state.selectedElementId = null;
     renderInspector(); markDirty();
   }));
@@ -477,6 +556,15 @@ function onPickElement(clip, id) {
   if (!clip.overrides.find((o) => o.elementId === id)) {
     clip.overrides.push({ elementId: id, hidden: false, x: 0, y: 0, scale: 1, rotate: 0, animation: { preset: "pop", duration: 400, delay: 0, easing: "ease-out" } });
   }
+  selectElement(clip, id);
+  markDirty();
+}
+function addCanvasElement(clip, kind) {
+  const id = "ce-" + Math.random().toString(36).slice(2, 8);
+  const base = { elementId: id, hidden: false, x: Math.round(state.demo.size.width / 2), y: Math.round(state.demo.size.height / 3), scale: 1, rotate: 0, kind };
+  if (kind === "text") Object.assign(base, { text: "Title", fontSize: 32, color: "#111111" });
+  else Object.assign(base, { w: 160, h: 100, bg: "#5b8cff", radius: 8 });
+  (clip.elements ||= []).push(base);
   selectElement(clip, id);
   markDirty();
 }
@@ -535,7 +623,7 @@ function onSelMove(e) {
   } else if (selDrag.baseW > 0) {
     selDrag.o.scale = Math.max(0.1, +(selDrag.oscale + dx / (selDrag.baseW * selDrag.scale)).toFixed(2));
   }
-  pushToRenderer(); // live; overlay follows via the transport loop
+  markDirtyLive(); // re-apply in place; overlay follows via the transport loop
 }
 function onSelUp() {
   window.removeEventListener("pointermove", onSelMove);

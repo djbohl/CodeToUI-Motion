@@ -76,6 +76,38 @@ test("normalizeDemo cleans up element overrides", () => {
   assert.equal(ov[1].hidden, true);
 });
 
+test("normalizeDemo builds canvas clips with text/box elements", () => {
+  const d = normalizeDemo({
+    clips: [{
+      type: "canvas", duration: 1500,
+      elements: [
+        { kind: "text", text: "Hi", fontSize: "40", x: 10, animation: { preset: "fade", duration: 300 } },
+        { kind: "box", w: "200", bg: "#f00" },
+      ],
+    }],
+  });
+  const clip = d.clips[0];
+  assert.equal(clip.type, "canvas");
+  assert.equal(clip.screen, null);
+  assert.equal(clip.elements.length, 2);
+  assert.equal(clip.elements[0].kind, "text");
+  assert.equal(clip.elements[0].fontSize, 40); // coerced
+  assert.ok(clip.elements[0].elementId.startsWith("ce-")); // generated id
+  assert.equal(clip.elements[0].animation.preset, "fade");
+  assert.equal(clip.elements[1].kind, "box");
+  assert.equal(clip.elements[1].w, 200);
+  assert.equal(clip.elements[1].bg, "#f00");
+  assert.equal(clip.overrides, undefined); // canvas clips carry elements, not overrides
+});
+
+test("validateDemo rejects a canvas element with a bad kind", async () => {
+  const model = await loadPrototype(DEMO);
+  assert.throws(
+    () => validateDemo({ clips: [{ type: "canvas", duration: 1000, elements: [{ elementId: "ce-1", kind: "circle" }] }] }, model),
+    /kind must be text or box/i
+  );
+});
+
 test("validateDemo rejects an override without an elementId", async () => {
   const model = await loadPrototype(DEMO);
   assert.throws(

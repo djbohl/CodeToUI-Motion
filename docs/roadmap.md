@@ -24,7 +24,7 @@ Status legend: ✅ done · 🚧 in progress · ⬜ planned
 - ✅ Editor-driven playback (play uses the same seek path as scrubbing).
 - ✅ Project switcher dropdown.
 
-## M2 — element animation + canvas clips 🚧
+## M2 — element animation + canvas clips ✅
 
 Goal: the "pull the modal onto its own frame and make it pop" workflow. Keep it simple,
 with a custom-code escape hatch (the "simple code" throughline).
@@ -36,8 +36,11 @@ with a custom-code escape hatch (the "simple code" throughline).
   element in the preview (renderer `setPick`).
 - ✅ **M2b** — drag-to-reposition / corner-resize elements on a selection overlay over
   the preview (renderer `elementRect`; editor maps stage→viewport by the preview scale).
-- ⬜ **M2c** — blank-canvas clips (`type:"canvas"`): start empty, add elements copied
-  from any screen (by id) or simple text/box; same override/animation controls.
+- ✅ **M2c** — blank-canvas clips (`type:"canvas"`): add **text** and **box** elements
+  (title cards, callouts, intro/outro), each positioned/animated with the same
+  controls + overlay drag/resize. (Copying an existing screen element onto a canvas —
+  with its styling — is deferred as a stretch; animating it in place on a screen clip
+  already covers the main case.)
 
 ## M3 — audio ⬜
 

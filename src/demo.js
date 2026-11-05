@@ -73,22 +73,27 @@ export function normalizeDemo(demo) {
     width: demo?.size?.width || DEMO_DEFAULTS.size.width,
     height: demo?.size?.height || DEMO_DEFAULTS.size.height,
   };
-  const clips = (demo?.clips || []).map((c) => ({
-    id: c.id || clipId(),
-    type: c.type === "canvas" ? "canvas" : "screen",
-    screen: c.screen || null,
-    duration: c.duration > 0 ? c.duration : DEMO_DEFAULTS.hold,
-    transitionIn: {
-      type: normalizeTransition(c.transitionIn?.type),
-      duration: c.transitionIn?.duration >= 0 ? c.transitionIn.duration : DEMO_DEFAULTS.transitionMs,
-    },
-    captions: (c.captions || []).map((cap) => ({
-      text: cap.text,
-      at: cap.at >= 0 ? cap.at : 0,
-      for: cap.for > 0 ? cap.for : 1000,
-    })),
-    overrides: (c.overrides || []).map(normalizeOverride).filter((o) => o.elementId),
-  }));
+  const clips = (demo?.clips || []).map((c) => {
+    const type = c.type === "canvas" ? "canvas" : "screen";
+    const clip = {
+      id: c.id || clipId(),
+      type,
+      screen: type === "screen" ? c.screen || null : null,
+      duration: c.duration > 0 ? c.duration : DEMO_DEFAULTS.hold,
+      transitionIn: {
+        type: normalizeTransition(c.transitionIn?.type),
+        duration: c.transitionIn?.duration >= 0 ? c.transitionIn.duration : DEMO_DEFAULTS.transitionMs,
+      },
+      captions: (c.captions || []).map((cap) => ({
+        text: cap.text,
+        at: cap.at >= 0 ? cap.at : 0,
+        for: cap.for > 0 ? cap.for : 1000,
+      })),
+    };
+    if (type === "canvas") clip.elements = (c.elements || []).map(normalizeCanvasEl);
+    else clip.overrides = (c.overrides || []).map(normalizeOverride).filter((o) => o.elementId);
+    return clip;
+  });
   return { version: 1, fps, size, clips, audio: demo?.audio || [] };
 }
 
@@ -119,6 +124,27 @@ function normalizeOverride(o) {
   return out;
 }
 
+export const CANVAS_KINDS = ["text", "box"];
+// A canvas element = an override (transform/anim/css/js, positioned by translate x/y from
+// the top-left) plus its own content (text or a box). Gets a stable id if missing.
+export function normalizeCanvasEl(e) {
+  const base = normalizeOverride(e);
+  if (!base.elementId) base.elementId = "ce-" + Math.random().toString(36).slice(2, 8);
+  const kind = e.kind === "box" ? "box" : "text";
+  const out = { ...base, kind };
+  if (kind === "text") {
+    out.text = typeof e.text === "string" ? e.text : "Text";
+    out.fontSize = num(e.fontSize, 32);
+    out.color = typeof e.color === "string" ? e.color : "#111111";
+  } else {
+    out.w = num(e.w, 160);
+    out.h = num(e.h, 100);
+    out.bg = typeof e.bg === "string" ? e.bg : "#5b8cff";
+    out.radius = num(e.radius, 8);
+  }
+  return out;
+}
+
 /** Validate against the model. Throws on hard errors; returns { warnings }. */
 export function validateDemo(demo, model) {
   const warnings = [];
@@ -141,6 +167,10 @@ export function validateDemo(demo, model) {
     });
     (c.overrides || []).forEach((o, j) => {
       if (typeof o.elementId !== "string" || !o.elementId) throw new Error(`${at} override ${j}: needs an elementId.`);
+    });
+    (c.elements || []).forEach((el, j) => {
+      if (typeof el.elementId !== "string" || !el.elementId) throw new Error(`${at} element ${j}: needs an elementId.`);
+      if (!CANVAS_KINDS.includes(el.kind)) throw new Error(`${at} element ${j}: kind must be text or box.`);
     });
   });
   return { warnings };

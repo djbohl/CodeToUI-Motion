@@ -103,9 +103,9 @@ Demo document shape:
 - `src/ui/` — the browser editor (timeline, preview, inspector) in CodeToUI's visual style.
 
 Element animation (M2): pick an element on a clip's screen, give it a preset entrance
-(pop/fade/slide/scale) or custom CSS/JS, and drag/resize it on the preview overlay.
-Planned next: blank-canvas clips (M2c), then music + voiceover (M3). See
-[docs/roadmap.md](./docs/roadmap.md).
+(pop/fade/slide/scale) or custom CSS/JS, and drag/resize it on the preview overlay. Or add
+a **blank-canvas clip** with text/box elements (title cards, callouts) that animate the
+same way. Planned next: music + voiceover (M3). See [docs/roadmap.md](./docs/roadmap.md).
 
 ## Credits
 
