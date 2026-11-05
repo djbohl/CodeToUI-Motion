@@ -276,6 +276,41 @@ function readAudioDuration(file) {
     au.src = url;
   });
 }
+// --- voiceover recording (MediaRecorder) ------------------------------------
+let mediaRec = null, recChunks = [], recStart = 0, recTimer = null;
+function updateRecLabel(on) {
+  const b = $("#rec-voice");
+  if (!b) return;
+  if (on) {
+    const s = Math.floor((Date.now() - recStart) / 1000);
+    b.textContent = `■ Stop ${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+    b.classList.add("recording");
+  } else { b.textContent = "● Record"; b.classList.remove("recording"); }
+}
+async function toggleRecord() {
+  if (mediaRec && mediaRec.state === "recording") { mediaRec.stop(); return; }
+  if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+    setStatus("Recording isn't supported in this browser.", "warn"); return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    recChunks = [];
+    mediaRec = new MediaRecorder(stream);
+    mediaRec.ondataavailable = (e) => { if (e.data.size) recChunks.push(e.data); };
+    mediaRec.onstop = async () => {
+      stream.getTracks().forEach((t) => t.stop());
+      clearInterval(recTimer); updateRecLabel(false);
+      const blob = new Blob(recChunks, { type: mediaRec.mimeType || "audio/webm" });
+      blob.name = "voiceover.webm"; // give uploadAudio a filename for the extension
+      await uploadAudio(blob, "voice");
+    };
+    mediaRec.start(); recStart = Date.now(); updateRecLabel(true);
+    recTimer = setInterval(() => updateRecLabel(true), 500);
+    setStatus("Recording… click Stop when you're done.");
+  } catch (e) {
+    setStatus("Microphone access failed: " + e.message, "error");
+  }
+}
 async function uploadAudio(file, kind) {
   try {
     setStatus(`Importing ${file.name}…`);
@@ -952,6 +987,7 @@ async function main() {
   $("#format").onchange = () => {};
   $("#add-music").onclick = () => importAudio("music");
   $("#add-voice").onclick = () => importAudio("voice");
+  $("#rec-voice").onclick = toggleRecord;
   $("#audio-file").onchange = (e) => { const f = e.target.files[0]; e.target.value = ""; if (f) uploadAudio(f, pendingAudioKind); };
   $("#project-switch").onclick = (e) => { e.stopPropagation(); toggleProjectMenu(); };
   document.addEventListener("click", (e) => {

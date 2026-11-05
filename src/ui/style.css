@@ -107,6 +107,8 @@ body {
 .topbar-btn:active { transform: translate(2px, 2px); box-shadow: none; }
 .topbar-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .btn-wide { width: 100%; margin-top: 6px; }
+.topbar-btn.recording { background: var(--danger); color: #fff; border-color: var(--danger); animation: rec-pulse 1s ease-in-out infinite; }
+@keyframes rec-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
 
 /* Topbar */
 .topbar {
