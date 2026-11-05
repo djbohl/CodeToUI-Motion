@@ -223,6 +223,11 @@ body {
 .audio-clip.selected { border-color: var(--accent); }
 .audio-clip .clip-label { font-size: 11px; color: var(--text); }
 .audio-clip .clip-sub { font-size: 9px; color: var(--muted); }
+.audio-resize {
+  position: absolute; right: 0; top: 0; width: 8px; height: 100%;
+  cursor: ew-resize; background: linear-gradient(90deg, transparent, var(--accent) 80%); opacity: 0.45;
+}
+.audio-resize:hover { opacity: 1; }
 .clip {
   position: absolute; top: 0; height: 96px;
   background: var(--surface-2); border: 2px solid var(--border);

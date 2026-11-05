@@ -193,9 +193,14 @@ function renderPalette() {
 }
 
 // --- timeline ---------------------------------------------------------------
+function timelineWidthMs() {
+  let w = totalMs();
+  for (const a of state.demo.audio || []) w = Math.max(w, a.start + audioLen(a));
+  return w;
+}
 function renderRuler() {
   const ruler = $("#ruler");
-  const secs = Math.max(1, Math.ceil(totalMs() / 1000) + 1);
+  const secs = Math.max(1, Math.ceil(timelineWidthMs() / 1000) + 1);
   ruler.style.width = secs * PPS + "px";
   ruler.innerHTML = "";
   for (let s = 0; s <= secs; s++) {
@@ -241,7 +246,7 @@ function renderAudioLane() {
     el.style.left = (a.start / 1000) * PPS + "px";
     el.style.width = (audioLen(a) / 1000) * PPS + "px";
     el.dataset.audioId = a.id;
-    el.innerHTML = `<span class="clip-label">${a.kind === "voice" ? "🎙" : "♪"} ${a.name || a.kind}</span><span class="clip-sub">${(audioLen(a) / 1000).toFixed(1)}s · vol ${Math.round((a.volume ?? 1) * 100)}%</span>`;
+    el.innerHTML = `<span class="clip-label">${a.kind === "voice" ? "🎙" : "♪"} ${a.name || a.kind}</span><span class="clip-sub">${(audioLen(a) / 1000).toFixed(1)}s · vol ${Math.round((a.volume ?? 1) * 100)}%</span><span class="audio-resize" title="Drag to trim the end"></span>`;
     lane.appendChild(el);
   }
 }
@@ -327,7 +332,7 @@ function renderAudioInspector(body, a) {
 function initTimelinePointer() {
   const scroll = $("#timeline-scroll");
   let mode = null; // "scrub" | "drag" | "resize" | "audio"
-  let clipId = null, startX = 0, startDur = 0, audioId = null, startAudioStart = 0;
+  let clipId = null, startX = 0, startDur = 0, audioId = null, startAudioStart = 0, startAudioLen = 0;
 
   const timeAtClientX = (clientX) => {
     const rect = scroll.getBoundingClientRect();
@@ -341,6 +346,10 @@ function initTimelinePointer() {
     if (e.target.classList.contains("clip-resize")) {
       mode = "resize"; clipId = clipEl.dataset.id; startX = e.clientX;
       startDur = state.demo.clips.find((c) => c.id === clipId).duration;
+    } else if (e.target.classList.contains("audio-resize")) {
+      mode = "audioResize"; audioId = audioEl.dataset.audioId; startX = e.clientX;
+      startAudioLen = audioLen(state.demo.audio.find((x) => x.id === audioId));
+      selectAudio(audioId);
     } else if (audioEl) {
       mode = "audio"; audioId = audioEl.dataset.audioId; startX = e.clientX;
       const a = state.demo.audio.find((x) => x.id === audioId);
@@ -371,12 +380,21 @@ function initTimelinePointer() {
     } else if (mode === "audio") {
       const a = state.demo.audio.find((x) => x.id === audioId);
       if (a) { a.start = Math.max(0, Math.round((startAudioStart + ((e.clientX - startX) / PPS) * 1000) / 50) * 50); renderAudioLane(); }
+    } else if (mode === "audioResize") {
+      const a = state.demo.audio.find((x) => x.id === audioId);
+      if (a) {
+        let len = Math.max(200, Math.round((startAudioLen + ((e.clientX - startX) / PPS) * 1000) / 50) * 50);
+        let end = a.trimStart + len;
+        if (a.dur != null) end = Math.min(end, a.dur); // can't play past the source
+        a.trimEnd = end;
+        renderAudioLane(); pushAudioToRenderer();
+      }
     }
   });
 
   const end = (e) => {
     if (mode === "resize" || mode === "drag") markDirty();
-    else if (mode === "audio") markAudioDirty();
+    else if (mode === "audio" || mode === "audioResize") { markAudioDirty(); renderInspector(); }
     mode = null; clipId = null; audioId = null;
     try { scroll.releasePointerCapture(e.pointerId); } catch {}
   };
