@@ -891,11 +891,43 @@ const THEMES = [
   { id: "light", label: "☀ Light" },
   { id: "spooky", label: "🌙 Spooky" },
 ];
+// A hand-drawn-ish corner spiderweb as an SVG background (radial spokes + sagging rings).
+function makeCornerWeb(size, anchor) {
+  const O = anchor === "br" ? [size, size] : [0, 0];
+  const s = anchor === "br" ? -1 : 1;
+  const angs = [6, 20, 36, 54, 72, 84].map((d) => (d * Math.PI) / 180);
+  const pt = (a, r) => [(O[0] + s * Math.cos(a) * r).toFixed(1), (O[1] + s * Math.sin(a) * r).toFixed(1)];
+  let d = "";
+  for (const a of angs) d += `M${O[0]} ${O[1]}L${pt(a, size).join(" ")}`;
+  for (const f of [0.22, 0.44, 0.66, 0.88]) {
+    const r = size * f;
+    for (let i = 0; i < angs.length - 1; i++) {
+      const p1 = pt(angs[i], r), p2 = pt(angs[i + 1], r);
+      const mx = (+p1[0] + +p2[0]) / 2, my = (+p1[1] + +p2[1]) / 2;
+      const cx = (O[0] + (mx - O[0]) * 0.8).toFixed(1), cy = (O[1] + (my - O[1]) * 0.8).toFixed(1);
+      d += `M${p1.join(" ")}Q${cx} ${cy} ${p2.join(" ")}`; // slight sag toward the corner
+    }
+  }
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='${size}' height='${size}' viewBox='0 0 ${size} ${size}'><path d='${d}' fill='none' stroke='rgba(185,167,230,0.22)' stroke-width='1'/></svg>`;
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+}
 function applyTheme(id) {
   const t = THEMES.find((x) => x.id === id) || THEMES[0];
   document.documentElement.setAttribute("data-theme", t.id);
   const btn = $("#theme");
   if (btn) btn.textContent = t.label;
+  // Spooky swaps the main canvas's grid for corner spiderwebs; others fall back to CSS.
+  const pane = $("#stage-pane");
+  if (pane) {
+    if (t.id === "spooky") {
+      pane.style.backgroundImage = `${makeCornerWeb(320, "tl")}, ${makeCornerWeb(260, "br")}`;
+      pane.style.backgroundRepeat = "no-repeat, no-repeat";
+      pane.style.backgroundPosition = "top left, bottom right";
+      pane.style.backgroundSize = "auto, auto";
+    } else {
+      pane.style.backgroundImage = pane.style.backgroundRepeat = pane.style.backgroundPosition = pane.style.backgroundSize = "";
+    }
+  }
   try { localStorage.setItem("c2p-theme", t.id); } catch {}
   window.dispatchEvent(new CustomEvent("c2p-theme", { detail: t.id }));
 }

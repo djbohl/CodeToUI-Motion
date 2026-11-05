@@ -49,21 +49,27 @@
   --border-strong: #514a6b;
   --text: #ecebf2;
   --muted: #9a94ad;
-  --accent: #b9a7e6;   /* muted amethyst */
-  --accent-2: #8fd3cf; /* ghostly moonstone */
+  --accent: #b9a7e6;   /* muted amethyst (goth) */
+  --accent-2: #d8b26a; /* candle amber (cozy) */
   --accent-ink: #0b0b0f;
-  --ok: #8fd3a6;
+  --ok: #9ad1a0;
   --danger: #e68aa0;
-  --shadow: rgba(0, 0, 0, 0.7);
+  --shadow: rgba(0, 0, 0, 0.72);
 }
-/* A faint moonlit glow on the accents — the whimsigoth touch, kept subtle. */
-:root[data-theme="spooky"] .brand-accent { text-shadow: 0 0 10px rgba(185, 167, 230, 0.55); }
+/* Candlelit vignette — a soft spotlight on the device, darkening the canvas edges for a
+   cozy, eerie depth. Scoped to the stage so it actually shows (never eats clicks). */
+:root[data-theme="spooky"] .stage-pane::after {
+  content: ""; position: absolute; inset: 0; z-index: 3; pointer-events: none;
+  background: radial-gradient(120% 110% at 50% 46%, transparent 48%, rgba(0, 0, 0, 0.55) 100%);
+}
+/* A faint glow on the accents — the whimsigoth touch, kept subtle. */
+:root[data-theme="spooky"] .brand-accent { text-shadow: 0 0 10px rgba(185, 167, 230, 0.6); }
 :root[data-theme="spooky"] .sidebar-title,
-:root[data-theme="spooky"] .inspector-subtitle { text-shadow: 0 0 8px rgba(143, 211, 207, 0.35); }
+:root[data-theme="spooky"] .inspector-subtitle { text-shadow: 0 0 9px rgba(216, 178, 106, 0.4); }
 :root[data-theme="spooky"] .topbar-btn.active,
 :root[data-theme="spooky"] .clip.selected,
 :root[data-theme="spooky"] .audio-clip.selected {
-  box-shadow: 0 0 10px rgba(185, 167, 230, 0.4), 2px 2px 0 var(--shadow);
+  box-shadow: 0 0 12px rgba(185, 167, 230, 0.45), 2px 2px 0 var(--shadow);
 }
 
 * { box-sizing: border-box; }
