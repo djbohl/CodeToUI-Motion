@@ -1,241 +1,359 @@
-// CodeToPrototype web UI — a form-based editor over the walkthrough script, a
-// click-to-play preview (the Phase-1 player in an iframe), and a Render button that
-// posts to the engine and downloads the resulting video. No timeline, no live render
-// preview — Render is the only heavy action.
+// CodeToUI Motion — the demo editor. A timeline of clips you scrub and play, with
+// visible transitions and captions, rendered live in a same-origin preview iframe (the
+// demo renderer), and exported to video on demand. Looks like CodeToUI.
+//
+// The preview iframe embeds the project's screens once (/api/preview); on every edit we
+// push the in-memory clips into it via contentWindow.__demo.load() — no reload, no save
+// round-trip. Edits autosave to proto.demo.json (debounced).
 
-const $ = (sel) => document.querySelector(sel);
+const $ = (s) => document.querySelector(s);
+const PPS = 90; // timeline pixels per second
+const TRANSITIONS = ["instant", "dissolve", "slide-left", "slide-right", "slide-up", "slide-down"];
 
-// --- state ------------------------------------------------------------------
-let model = null; // { activeProject, start, screens, links, script }
-let steps = []; // editable copy of script.steps
+const state = {
+  project: null,
+  screens: [],
+  demo: { version: 1, fps: 30, size: { width: 390, height: 844 }, clips: [], audio: [] },
+  selectedId: null,
+};
 
-// --- REST helpers -----------------------------------------------------------
+// --- REST -------------------------------------------------------------------
+const jsonHeaders = { "Content-Type": "application/json" };
 async function api(path, opts) {
   const res = await fetch(path, opts);
   const ct = res.headers.get("content-type") || "";
-  if (!res.ok) {
-    let msg = res.statusText;
-    if (ct.includes("application/json")) msg = (await res.json()).error || msg;
-    throw new Error(msg);
-  }
-  return ct.includes("application/json") ? res.json() : res;
+  if (!res.ok) throw new Error(ct.includes("json") ? (await res.json()).error : res.statusText);
+  return ct.includes("json") ? res.json() : res;
 }
-
 function setStatus(msg, kind = "") {
   const el = $("#status");
   el.textContent = msg || "";
   el.className = "status" + (kind ? " " + kind : "");
 }
 
-// --- move encoding ----------------------------------------------------------
-// A step's "move" is one of: hold / click:<elementId> / nav:$back / nav:$home.
-function moveValue(step) {
-  if (step.click) return "click:" + step.click;
-  if (step.nav) return "nav:" + step.nav;
-  return "hold";
+// --- preview renderer bridge ------------------------------------------------
+function renderer() {
+  try { return $("#preview").contentWindow.__demo || null; } catch { return null; }
 }
-function applyMove(step, value) {
-  step.click = null;
-  step.nav = null;
-  if (value.startsWith("click:")) step.click = value.slice(6);
-  else if (value.startsWith("nav:")) step.nav = value.slice(4);
+function whenRendererReady() {
+  return new Promise((resolve) => {
+    const t0 = Date.now();
+    (function poll() {
+      if (renderer()) return resolve(renderer());
+      if (Date.now() - t0 > 5000) return resolve(null);
+      setTimeout(poll, 40);
+    })();
+  });
 }
-function linksForScreen(screen) {
-  return (model.links || []).filter((l) => l.screen === screen);
+function pushToRenderer() {
+  const r = renderer();
+  if (r) r.load(state.demo.clips, state.demo.size);
 }
-
-// --- rendering the step list -----------------------------------------------
-function optionEl(value, label, selected) {
-  const o = document.createElement("option");
-  o.value = value;
-  o.textContent = label;
-  if (selected) o.selected = true;
-  return o;
-}
-
-function renderSteps() {
-  const host = $("#steps");
-  host.innerHTML = "";
-  steps.forEach((step, i) => host.appendChild(renderStep(step, i)));
-  $("#steps-title").textContent = `Walkthrough — ${steps.length} step${steps.length === 1 ? "" : "s"}`;
+async function reloadPreview() {
+  $("#preview").src = "/api/preview?t=" + Date.now();
+  await new Promise((res) => $("#preview").addEventListener("load", res, { once: true }));
+  await whenRendererReady();
+  pushToRenderer();
+  fitPreview();
 }
 
-function renderStep(step, i) {
-  const row = document.createElement("div");
-  row.className = "step";
-
-  const num = document.createElement("div");
-  num.className = "step-num";
-  num.textContent = i + 1;
-  row.appendChild(num);
-
-  const grid = document.createElement("div");
-  grid.className = "step-grid";
-
-  // Screen
-  grid.appendChild(labeled("Screen", (() => {
-    const s = document.createElement("select");
-    (model.screens || []).forEach((name) => s.appendChild(optionEl(name, name, name === step.screen)));
-    s.onchange = () => { step.screen = s.value; applyMove(step, "hold"); renderSteps(); };
-    return s;
-  })()));
-
-  // Move
-  grid.appendChild(labeled("Move", (() => {
-    const s = document.createElement("select");
-    s.appendChild(optionEl("hold", "— hold —", moveValue(step) === "hold"));
-    linksForScreen(step.screen).forEach((l) => {
-      const val = "click:" + l.elementId;
-      s.appendChild(optionEl(val, `click → ${l.target} (${l.mode || "navigate"})`, moveValue(step) === val));
-    });
-    s.appendChild(optionEl("nav:$back", "⬅ back", moveValue(step) === "nav:$back"));
-    s.appendChild(optionEl("nav:$home", "⌂ home", moveValue(step) === "nav:$home"));
-    s.onchange = () => applyMove(step, s.value);
-    return s;
-  })()));
-
-  // Dwell
-  grid.appendChild(labeled("Dwell (ms)", numberInput(step.dwell ?? 1500, (v) => (step.dwell = v), 0, 60000)));
-  // Speed
-  grid.appendChild(labeled("Speed", numberInput(step.speed ?? 1, (v) => (step.speed = v), 0.1, 10, 0.1)));
-
-  // Caption
-  const cap = step.caption || null;
-  const capText = document.createElement("input");
-  capText.type = "text";
-  capText.placeholder = "caption (optional)";
-  capText.value = cap?.text || "";
-  const capAt = numberInput(cap?.at ?? 0, (v) => ensureCaption(step).at = v, 0, 60000);
-  const capFor = numberInput(cap?.for ?? 800, (v) => ensureCaption(step).for = v, 0, 60000);
-  capText.oninput = () => {
-    if (capText.value.trim()) ensureCaption(step).text = capText.value;
-    else step.caption = null;
-  };
-  grid.appendChild(labeled("Caption", capText));
-  grid.appendChild(labeled("at (ms)", capAt));
-  grid.appendChild(labeled("for (ms)", capFor));
-
-  row.appendChild(grid);
-
-  // Row actions
-  const actions = document.createElement("div");
-  actions.className = "step-actions";
-  actions.appendChild(iconBtn("↑", "Move up", () => move(i, -1), i === 0));
-  actions.appendChild(iconBtn("↓", "Move down", () => move(i, 1), i === steps.length - 1));
-  actions.appendChild(iconBtn("✕", "Remove", () => { steps.splice(i, 1); renderSteps(); }));
-  row.appendChild(actions);
-
-  return row;
+// --- autosave ---------------------------------------------------------------
+let saveTimer = null;
+function markDirty() {
+  pushToRenderer();
+  renderTimeline();
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(save, 600);
 }
-
-function ensureCaption(step) {
-  if (!step.caption) step.caption = { text: "", at: 0, for: 800 };
-  return step.caption;
-}
-function move(i, delta) {
-  const j = i + delta;
-  if (j < 0 || j >= steps.length) return;
-  [steps[i], steps[j]] = [steps[j], steps[i]];
-  renderSteps();
-}
-function labeled(label, control) {
-  const wrap = document.createElement("label");
-  wrap.className = "field";
-  const span = document.createElement("span");
-  span.textContent = label;
-  wrap.appendChild(span);
-  wrap.appendChild(control);
-  return wrap;
-}
-function numberInput(value, onChange, min, max, step = 1) {
-  const el = document.createElement("input");
-  el.type = "number";
-  el.value = value;
-  if (min != null) el.min = min;
-  if (max != null) el.max = max;
-  el.step = step;
-  el.oninput = () => onChange(el.value === "" ? undefined : Number(el.value));
-  return el;
-}
-function iconBtn(glyph, title, onClick, disabled) {
-  const b = document.createElement("button");
-  b.className = "btn btn-icon";
-  b.textContent = glyph;
-  b.title = title;
-  b.disabled = !!disabled;
-  b.onclick = onClick;
-  return b;
-}
-
-// --- top-level actions ------------------------------------------------------
-async function loadProjectList() {
-  const { projects, active } = await api("/api/projects");
-  const picker = $("#project-picker");
-  picker.innerHTML = "";
-  projects.forEach((p) => picker.appendChild(optionEl(p, p, p === active)));
-  picker.onchange = async () => {
-    await api("/api/projects/active", { method: "POST", headers: json(), body: JSON.stringify({ name: picker.value }) });
-    await loadProject();
-  };
-}
-
-async function loadProject(fresh = false) {
-  model = await api("/api/project" + (fresh ? "?fresh=1" : ""));
-  steps = (model.script?.steps || []).map((s) => ({ ...s }));
-  const picker = $("#project-picker");
-  if (picker.value !== model.activeProject) picker.value = model.activeProject;
-  renderSteps();
-  setStatus(`Loaded "${model.activeProject}"${fresh ? " (regenerated)" : ""}.`);
-}
-
-function json() {
-  return { "Content-Type": "application/json" };
-}
-
-function buildScript() {
-  return {
-    fps: Number($("#opt-fps").value) || 30,
-    format: $("#opt-format").value,
-    steps,
-  };
-}
-
 async function save() {
   try {
-    setStatus("Saving…");
-    const { warnings } = await api("/api/walkthrough", {
-      method: "POST",
-      headers: json(),
-      body: JSON.stringify({ script: buildScript() }),
-    });
-    setStatus(warnings?.length ? `Saved. ${warnings.join(" ")}` : "Saved.", warnings?.length ? "warn" : "ok");
+    const { warnings } = await api("/api/demo", { method: "POST", headers: jsonHeaders, body: JSON.stringify({ demo: state.demo }) });
+    setStatus(warnings?.length ? "Saved · " + warnings.join(" ") : "Saved.", warnings?.length ? "warn" : "ok");
   } catch (e) {
     setStatus("Save failed: " + e.message, "error");
   }
 }
 
-async function render() {
-  const btn = $("#btn-render");
+// --- clip helpers -----------------------------------------------------------
+function selectedClip() {
+  return state.demo.clips.find((c) => c.id === state.selectedId) || null;
+}
+function totalMs() {
+  return state.demo.clips.reduce((n, c) => n + c.duration, 0);
+}
+function newClip(screen) {
+  return {
+    id: "c" + Math.random().toString(36).slice(2, 8),
+    type: "screen",
+    screen,
+    duration: 2000,
+    transitionIn: { type: "instant", duration: 0 },
+    captions: [],
+  };
+}
+function addClip(screen) {
+  const c = newClip(screen);
+  state.demo.clips.push(c);
+  state.selectedId = c.id;
+  renderInspector();
+  markDirty();
+}
+
+// --- palette ----------------------------------------------------------------
+function renderPalette() {
+  const ul = $("#screen-palette");
+  ul.innerHTML = "";
+  state.screens.forEach((name) => {
+    const li = document.createElement("li");
+    li.textContent = name;
+    li.title = "Add " + name + " as a clip";
+    li.onclick = () => addClip(name);
+    ul.appendChild(li);
+  });
+}
+
+// --- timeline ---------------------------------------------------------------
+function renderRuler() {
+  const ruler = $("#ruler");
+  const secs = Math.max(1, Math.ceil(totalMs() / 1000) + 1);
+  ruler.style.width = secs * PPS + "px";
+  ruler.innerHTML = "";
+  for (let s = 0; s <= secs; s++) {
+    const tick = document.createElement("div");
+    tick.className = "tick";
+    tick.style.left = s * PPS + "px";
+    tick.textContent = s + "s";
+    ruler.appendChild(tick);
+  }
+}
+function renderTimeline() {
+  renderRuler();
+  const track = $("#track");
+  track.style.width = $("#ruler").style.width;
+  track.innerHTML = "";
+  let x = 0;
+  for (const c of state.demo.clips) {
+    const w = (c.duration / 1000) * PPS;
+    const el = document.createElement("div");
+    el.className = "clip" + (c.id === state.selectedId ? " selected" : "");
+    el.style.left = x + "px";
+    el.style.width = w + "px";
+    el.dataset.id = c.id;
+    const label = c.type === "screen" ? c.screen : "canvas";
+    const tr = c.transitionIn?.type && c.transitionIn.type !== "instant" ? `↷${c.transitionIn.type}` : "";
+    el.innerHTML = `<span class="clip-label">${label}</span><span class="clip-sub">${(c.duration / 1000).toFixed(1)}s ${tr}</span><span class="clip-resize" title="Drag to retime"></span>`;
+    track.appendChild(el);
+    x += w;
+  }
+}
+
+// Pointer handling on the timeline: scrub (empty/ruler), select+drag-reorder (clip body),
+// resize (right-edge handle).
+function initTimelinePointer() {
+  const scroll = $("#timeline-scroll");
+  let mode = null; // "scrub" | "drag" | "resize"
+  let clipId = null, startX = 0, startDur = 0;
+
+  const timeAtClientX = (clientX) => {
+    const rect = scroll.getBoundingClientRect();
+    const x = clientX - rect.left + scroll.scrollLeft;
+    return Math.max(0, (x / PPS) * 1000);
+  };
+
+  scroll.addEventListener("pointerdown", (e) => {
+    const clipEl = e.target.closest(".clip");
+    if (e.target.classList.contains("clip-resize")) {
+      mode = "resize"; clipId = clipEl.dataset.id; startX = e.clientX;
+      startDur = state.demo.clips.find((c) => c.id === clipId).duration;
+    } else if (clipEl) {
+      mode = "drag"; clipId = clipEl.dataset.id; startX = e.clientX;
+      state.selectedId = clipId; renderInspector(); renderTimeline();
+      const r = renderer(); if (r) r.seek(clipStart(clipId));
+    } else {
+      mode = "scrub"; const r = renderer(); if (r) r.seek(timeAtClientX(e.clientX)); updatePlayhead();
+    }
+    scroll.setPointerCapture(e.pointerId);
+  });
+
+  scroll.addEventListener("pointermove", (e) => {
+    if (!mode) return;
+    if (mode === "scrub") {
+      const r = renderer(); if (r) r.seek(timeAtClientX(e.clientX)); updatePlayhead();
+    } else if (mode === "resize") {
+      const c = state.demo.clips.find((x) => x.id === clipId);
+      c.duration = Math.max(200, Math.round((startDur + ((e.clientX - startX) / PPS) * 1000) / 50) * 50);
+      renderTimeline(); renderInspector(); pushToRenderer();
+    } else if (mode === "drag") {
+      // reorder preview: compute target index from pointer position
+      const idx = indexAtClientX(e.clientX);
+      reorderTo(clipId, idx);
+    }
+  });
+
+  const end = (e) => {
+    if (mode === "resize" || mode === "drag") markDirty();
+    mode = null; clipId = null;
+    try { scroll.releasePointerCapture(e.pointerId); } catch {}
+  };
+  scroll.addEventListener("pointerup", end);
+  scroll.addEventListener("pointercancel", end);
+}
+function clipStart(id) {
+  let t = 0;
+  for (const c of state.demo.clips) { if (c.id === id) return t; t += c.duration; }
+  return 0;
+}
+function indexAtClientX(clientX) {
+  const scroll = $("#timeline-scroll");
+  const rect = scroll.getBoundingClientRect();
+  const x = clientX - rect.left + scroll.scrollLeft;
+  let acc = 0, i = 0;
+  for (const c of state.demo.clips) {
+    const w = (c.duration / 1000) * PPS;
+    if (x < acc + w / 2) return i;
+    acc += w; i++;
+  }
+  return state.demo.clips.length - 1;
+}
+function reorderTo(id, idx) {
+  const from = state.demo.clips.findIndex((c) => c.id === id);
+  if (from === -1 || from === idx) return;
+  const [c] = state.demo.clips.splice(from, 1);
+  state.demo.clips.splice(idx, 0, c);
+  renderTimeline(); pushToRenderer();
+}
+
+// --- playhead / transport ---------------------------------------------------
+function updatePlayhead() {
+  const r = renderer();
+  const t = r ? r.time() : 0;
+  const total = r ? r.duration() : totalMs();
+  $("#playhead").style.left = (t / 1000) * PPS + "px";
+  $("#timecode").textContent = `${(t / 1000).toFixed(1)}s / ${(total / 1000).toFixed(1)}s`;
+  $("#play-pause").textContent = r && r.playing() ? "⏸" : "▶";
+}
+function transportLoop() {
+  updatePlayhead();
+  requestAnimationFrame(transportLoop);
+}
+
+// --- inspector --------------------------------------------------------------
+function field(label, control) {
+  const wrap = document.createElement("label");
+  wrap.className = "field";
+  const span = document.createElement("span");
+  span.textContent = label;
+  wrap.append(span, control);
+  return wrap;
+}
+function renderInspector() {
+  const body = $("#inspector-body");
+  const c = selectedClip();
+  body.innerHTML = "";
+  if (!c) { body.innerHTML = '<p class="inspector-empty">Select a clip in the timeline.</p>'; return; }
+
+  // Screen
+  const scr = document.createElement("select");
+  state.screens.forEach((n) => { const o = document.createElement("option"); o.value = n; o.textContent = n; o.selected = n === c.screen; scr.appendChild(o); });
+  scr.onchange = () => { c.screen = scr.value; markDirty(); };
+  body.appendChild(field("Screen", scr));
+
+  // Duration
+  const dur = document.createElement("input");
+  dur.type = "number"; dur.min = 200; dur.step = 100; dur.value = c.duration;
+  dur.onchange = () => { c.duration = Math.max(200, Number(dur.value) || 200); markDirty(); renderInspector(); };
+  body.appendChild(field("Duration (ms)", dur));
+
+  // Transition
+  const tr = document.createElement("select");
+  TRANSITIONS.forEach((t) => { const o = document.createElement("option"); o.value = t; o.textContent = t; o.selected = t === c.transitionIn.type; tr.appendChild(o); });
+  tr.onchange = () => {
+    c.transitionIn.type = tr.value;
+    if (tr.value === "instant") c.transitionIn.duration = 0;
+    else if (!c.transitionIn.duration) c.transitionIn.duration = 400;
+    markDirty(); renderInspector();
+  };
+  body.appendChild(field("Transition in", tr));
+
+  if (c.transitionIn.type !== "instant") {
+    const td = document.createElement("input");
+    td.type = "number"; td.min = 0; td.step = 50; td.value = c.transitionIn.duration;
+    td.onchange = () => { c.transitionIn.duration = Math.max(0, Number(td.value) || 0); markDirty(); };
+    body.appendChild(field("Transition (ms)", td));
+  }
+
+  // Captions
+  const capTitle = document.createElement("div");
+  capTitle.className = "inspector-subtitle";
+  capTitle.textContent = "Captions";
+  body.appendChild(capTitle);
+  (c.captions || []).forEach((cap, i) => body.appendChild(renderCaptionRow(c, cap, i)));
+  const addCap = document.createElement("button");
+  addCap.className = "topbar-btn btn-wide";
+  addCap.textContent = "+ Caption";
+  addCap.onclick = () => { (c.captions ||= []).push({ text: "Caption", at: 0, for: Math.min(1200, c.duration) }); renderInspector(); markDirty(); };
+  body.appendChild(addCap);
+
+  // Clip actions
+  const actions = document.createElement("div");
+  actions.className = "inspector-actions";
+  actions.append(
+    mkBtn("Duplicate", () => { const d = { ...c, id: "c" + Math.random().toString(36).slice(2, 8), captions: c.captions.map((x) => ({ ...x })) }; const idx = state.demo.clips.indexOf(c); state.demo.clips.splice(idx + 1, 0, d); state.selectedId = d.id; renderInspector(); markDirty(); }),
+    mkBtn("Delete", () => { state.demo.clips = state.demo.clips.filter((x) => x !== c); state.selectedId = null; renderInspector(); markDirty(); })
+  );
+  body.appendChild(actions);
+}
+function renderCaptionRow(clip, cap, i) {
+  const row = document.createElement("div");
+  row.className = "caption-row";
+  const text = document.createElement("input");
+  text.type = "text"; text.value = cap.text; text.placeholder = "text";
+  text.oninput = () => { cap.text = text.value; markDirty(); };
+  const at = document.createElement("input");
+  at.type = "number"; at.min = 0; at.step = 100; at.value = cap.at; at.title = "start (ms)";
+  at.onchange = () => { cap.at = Math.max(0, Number(at.value) || 0); markDirty(); };
+  const dur = document.createElement("input");
+  dur.type = "number"; dur.min = 0; dur.step = 100; dur.value = cap.for; dur.title = "duration (ms)";
+  dur.onchange = () => { cap.for = Math.max(0, Number(dur.value) || 0); markDirty(); };
+  const del = document.createElement("button");
+  del.className = "topbar-btn"; del.textContent = "✕";
+  del.onclick = () => { clip.captions.splice(i, 1); renderInspector(); markDirty(); };
+  row.append(text, at, dur, del);
+  return row;
+}
+function mkBtn(label, onClick) {
+  const b = document.createElement("button");
+  b.className = "topbar-btn"; b.textContent = label; b.onclick = onClick;
+  return b;
+}
+
+// --- preview fit ------------------------------------------------------------
+function fitPreview() {
+  const pane = $("#stage-pane");
+  const { width, height } = state.demo.size;
+  const availW = pane.clientWidth - 48;
+  const availH = pane.clientHeight - 48;
+  const scale = Math.max(0.1, Math.min(1, availW / width, availH / height));
+  const f = $("#preview");
+  f.style.width = width + "px";
+  f.style.height = height + "px";
+  f.style.transform = `scale(${scale})`;
+}
+
+// --- export -----------------------------------------------------------------
+async function doExport() {
+  const btn = $("#export");
   btn.disabled = true;
   try {
-    setStatus("Rendering… this runs headless Chromium + ffmpeg and may take a bit.");
-    const res = await fetch("/api/render", {
-      method: "POST",
-      headers: json(),
-      body: JSON.stringify({
-        script: buildScript(),
-        format: $("#opt-format").value,
-        fps: Number($("#opt-fps").value) || 30,
-        width: Number($("#opt-width").value) || 390,
-        cursor: $("#opt-cursor").checked,
-      }),
-    });
-    if (!res.ok) {
-      const msg = (res.headers.get("content-type") || "").includes("json") ? (await res.json()).error : res.statusText;
-      throw new Error(msg);
-    }
+    setStatus("Rendering… headless Chromium + ffmpeg, this can take a bit.");
+    const res = await fetch("/api/render", { method: "POST", headers: jsonHeaders, body: JSON.stringify({ demo: state.demo, format: $("#format").value }) });
+    if (!res.ok) throw new Error((res.headers.get("content-type") || "").includes("json") ? (await res.json()).error : res.statusText);
     const blob = await res.blob();
-    downloadBlob(blob, `${model.activeProject}.${$("#opt-format").value}`);
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${state.project}.${$("#format").value}`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     setStatus("Rendered.", "ok");
   } catch (e) {
     setStatus("Render failed: " + e.message, "error");
@@ -244,53 +362,67 @@ async function render() {
   }
 }
 
-function downloadBlob(blob, filename) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+// --- load / boot ------------------------------------------------------------
+async function loadProject(fresh = false, reload = false) {
+  const data = await api("/api/project" + (fresh ? "?fresh=1" : ""));
+  state.project = data.activeProject;
+  state.screens = data.screens;
+  state.demo = data.demo;
+  state.selectedId = state.demo.clips[0]?.id || null;
+  $("#current-project").textContent = state.project;
+  renderPalette();
+  renderTimeline();
+  renderInspector();
+  if (reload) await reloadPreview(); else { pushToRenderer(); fitPreview(); }
+  setStatus(fresh ? "Re-seeded from the prototype flow." : "");
 }
 
-function openPreview() {
-  const ov = $("#preview-overlay");
-  $("#preview-title").textContent = `Preview — ${model.activeProject} (click through it)`;
-  $("#preview-frame").src = "/api/preview?t=" + Date.now();
-  ov.hidden = false;
-}
-function closePreview() {
-  $("#preview-overlay").hidden = true;
-  $("#preview-frame").src = "about:blank";
-}
-
-// --- boot -------------------------------------------------------------------
 async function main() {
-  $("#btn-play").onclick = openPreview;
-  $("#preview-close").onclick = closePreview;
-  $("#btn-save").onclick = save;
-  $("#btn-render").onclick = render;
-  $("#btn-add").onclick = () => {
-    steps.push({ screen: model?.start || (model?.screens || [])[0], dwell: 1500, speed: 1 });
-    renderSteps();
+  // theme
+  $("#theme").onclick = () => {
+    const html = document.documentElement;
+    const light = html.getAttribute("data-theme") === "light";
+    html.setAttribute("data-theme", light ? "dark" : "light");
+    $("#theme").textContent = light ? "☾ Dark" : "☀ Light";
   };
-  $("#btn-regen").onclick = async () => {
-    if (!confirm("Regenerate the walkthrough from the links graph? Unsaved edits will be lost.")) return;
-    await loadProject(true);
+  // transport
+  $("#play-pause").onclick = () => { const r = renderer(); if (!r) return; r.playing() ? r.pause() : r.play(); };
+  $("#to-start").onclick = () => { const r = renderer(); if (r) r.seek(0); };
+  $("#seed-flow").onclick = async () => {
+    if (!confirm("Rebuild the timeline from the prototype's click-flow? Unsaved edits are replaced.")) return;
+    await loadProject(true, false); markDirty();
   };
+  $("#export").onclick = doExport;
+  $("#format").onchange = () => {};
+  $("#project-switch").onclick = () => switchProjectPrompt();
 
+  initTimelinePointer();
+  window.addEventListener("resize", fitPreview);
+  transportLoop();
+
+  // boot: ?project=<name> handoff from CodeToUI
   try {
-    await loadProjectList();
-    // A launch from CodeToUI arrives as ?project=<name>.
     const wanted = new URLSearchParams(location.search).get("project");
-    if (wanted) {
-      await api("/api/projects/active", { method: "POST", headers: json(), body: JSON.stringify({ name: wanted }) }).catch(() => {});
-    }
-    await loadProject();
+    if (wanted) await api("/api/projects/active", { method: "POST", headers: jsonHeaders, body: JSON.stringify({ name: wanted }) }).catch(() => {});
+    // initial preview iframe load (embeds this project's screens)
+    $("#preview").src = "/api/preview";
+    await new Promise((res) => $("#preview").addEventListener("load", res, { once: true }));
+    await whenRendererReady();
+    await loadProject(false, false);
   } catch (e) {
     setStatus("Could not load a project: " + e.message + " — set C2P_PROJECTS_ROOT to a CodeToUI projects folder.", "error");
+  }
+}
+
+async function switchProjectPrompt() {
+  try {
+    const { projects, active } = await api("/api/projects");
+    const name = prompt("Switch to project:\n" + projects.join(", "), active);
+    if (!name || name === active || !projects.includes(name)) return;
+    await api("/api/projects/active", { method: "POST", headers: jsonHeaders, body: JSON.stringify({ name }) });
+    await loadProject(false, true); // reload preview: different screens embedded
+  } catch (e) {
+    setStatus("Switch failed: " + e.message, "error");
   }
 }
 

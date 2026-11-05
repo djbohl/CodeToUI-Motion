@@ -1,22 +1,21 @@
-// The CodeToPrototype web backend, independent of how it's hosted (Vite dev plugin
-// now, an Electron shell later) — mirroring CodeToUI's createProtoApi factory so dev
-// and desktop can't drift. It operates on one *active* project at a time within a
-// projects root (CodeToUI's own root), and drives the Phase-1 engine to preview and
-// render walkthrough videos.
+// The CodeToUI Motion web backend, independent of how it's hosted (Vite dev plugin now,
+// an Electron shell later) — mirroring CodeToUI's createProtoApi factory so dev and
+// desktop can't drift. It operates on one *active* project at a time within a projects
+// root (CodeToUI's own root), and drives the engine to preview and render demo videos.
 
 import { readFile, writeFile, mkdtemp, rm, stat } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { listProjects, readActive, writeActive } from "./projects.js";
+import { listProjects, writeActive } from "./projects.js";
 import { loadPrototype } from "../src/load-project.js";
-import { buildAutoWalk, validateScript, mergeDefaults } from "../src/walkthrough.js";
-import { buildPlayerHtml } from "../src/player.js";
-import { captureFrames } from "../src/capture.js";
+import { buildDemoFromLinks, validateDemo, normalizeDemo } from "../src/demo.js";
+import { buildDemoHtml } from "../src/demo-renderer.js";
+import { captureDemo } from "../src/capture.js";
 import { encode } from "../src/encode.js";
 
-const SCRIPT_FILE = "proto.video.json"; // saved walkthrough, per project (disk truth)
+const DEMO_FILE = "proto.demo.json"; // saved demo document, per project (disk truth)
 
 async function readJsonBody(req) {
   const chunks = [];
@@ -33,17 +32,17 @@ async function fileExists(p) {
   }
 }
 
-// The saved walkthrough for a project, or a fresh auto-walk if none is saved.
-async function scriptForProject(activeDir, model) {
-  const p = path.join(activeDir, SCRIPT_FILE);
+// The saved demo for a project, or a fresh seed from the links flow if none is saved.
+async function demoForProject(activeDir, model) {
+  const p = path.join(activeDir, DEMO_FILE);
   if (await fileExists(p)) {
     try {
-      return JSON.parse(await readFile(p, "utf8"));
+      return normalizeDemo(JSON.parse(await readFile(p, "utf8")));
     } catch {
-      /* corrupt — fall back to auto-walk */
+      /* corrupt — fall back to a fresh seed */
     }
   }
-  return buildAutoWalk(model);
+  return buildDemoFromLinks(model);
 }
 
 export function createVideoApi({ projectsRoot, initialProject }) {
@@ -93,34 +92,32 @@ export function createVideoApi({ projectsRoot, initialProject }) {
       if (url === "/api/project" && req.method === "GET") {
         const query = new URLSearchParams(req.url.split("?")[1] || "");
         const model = await loadPrototype(activeDir);
-        const script = query.get("fresh") ? buildAutoWalk(model) : await scriptForProject(activeDir, model);
+        const demo = query.get("fresh") ? buildDemoFromLinks(model) : await demoForProject(activeDir, model);
         json({
           activeProject: activeName,
           start: model.start,
           screens: model.order,
           links: model.links,
-          script,
+          demo,
         });
         return;
       }
 
-      if (url === "/api/walkthrough" && req.method === "POST") {
+      if (url === "/api/demo" && req.method === "POST") {
         const body = await readJsonBody(req);
         const model = await loadPrototype(activeDir);
-        const { warnings } = validateScript(body.script, model);
-        await writeFile(
-          path.join(activeDir, SCRIPT_FILE),
-          JSON.stringify(body.script, null, 2) + "\n",
-          "utf8"
-        );
+        const demo = normalizeDemo(body.demo);
+        const { warnings } = validateDemo(demo, model);
+        await writeFile(path.join(activeDir, DEMO_FILE), JSON.stringify(demo, null, 2) + "\n", "utf8");
         json({ ok: true, warnings });
         return;
       }
 
       if (url === "/api/preview" && req.method === "GET") {
         const model = await loadPrototype(activeDir);
+        const demo = await demoForProject(activeDir, model);
         res.setHeader("Content-Type", "text/html; charset=utf-8");
-        res.end(buildPlayerHtml(model, { title: activeName }));
+        res.end(buildDemoHtml(model, demo));
         return;
       }
 
@@ -141,28 +138,20 @@ export function createVideoApi({ projectsRoot, initialProject }) {
 
   async function renderToResponse(res, activeDir, name, body) {
     const model = await loadPrototype(activeDir);
-    const raw = body.script || (await scriptForProject(activeDir, model));
-    validateScript(raw, model); // throws on bad steps
-    const script = mergeDefaults(raw);
-    if (body.format) script.format = body.format;
-    if (body.fps != null) script.fps = Number(body.fps);
+    const demo = normalizeDemo(body.demo || (await demoForProject(activeDir, model)));
+    validateDemo(demo, model); // throws on bad clips
+    const format = body.format === "webm" ? "webm" : "mp4";
 
     const work = await mkdtemp(path.join(tmpdir(), "c2p-web-"));
     const framesDir = path.join(work, "frames");
-    const outPath = path.join(work, `${name}.${script.format}`);
+    const outPath = path.join(work, `${name}.${format}`);
     try {
-      const manifest = await captureFrames(model, script, {
-        framesDir,
-        width: Number(body.width) || 390,
-        height: Number(body.height) || 800,
-        scale: Number(body.scale) || 2,
-        cursor: body.cursor !== false,
-      });
+      const manifest = await captureDemo(model, demo, { framesDir, fps: demo.fps, format });
       await encode(manifest, outPath);
 
       res.statusCode = 200;
-      res.setHeader("Content-Type", script.format === "webm" ? "video/webm" : "video/mp4");
-      res.setHeader("Content-Disposition", `attachment; filename="${name}.${script.format}"`);
+      res.setHeader("Content-Type", format === "webm" ? "video/webm" : "video/mp4");
+      res.setHeader("Content-Disposition", `attachment; filename="${name}.${format}"`);
       await new Promise((resolve, reject) => {
         const stream = createReadStream(outPath);
         stream.on("error", reject);
@@ -176,7 +165,7 @@ export function createVideoApi({ projectsRoot, initialProject }) {
   }
 
   function close() {
-    // No watcher/WebSocket to tear down in v1.
+    // No watcher/WebSocket to tear down.
   }
 
   return { middleware, close, setActive };
