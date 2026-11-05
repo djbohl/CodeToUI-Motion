@@ -6,8 +6,12 @@
 // push the in-memory clips into it via contentWindow.__demo.load() — no reload, no save
 // round-trip. Edits autosave to proto.demo.json (debounced).
 
+import { initPet } from "./pet.js";
+
 const $ = (s) => document.querySelector(s);
 const PPS = 90; // timeline pixels per second
+let pet = null;
+let everPlayed = false;
 const TRANSITIONS = ["instant", "dissolve", "slide-left", "slide-right", "slide-up", "slide-down"];
 
 const state = {
@@ -97,6 +101,7 @@ function addClip(screen) {
   state.selectedId = c.id;
   renderInspector();
   markDirty();
+  pet?.react("clipAdded");
 }
 
 // --- palette ----------------------------------------------------------------
@@ -168,9 +173,9 @@ function initTimelinePointer() {
     } else if (clipEl) {
       mode = "drag"; clipId = clipEl.dataset.id; startX = e.clientX;
       state.selectedId = clipId; renderInspector(); renderTimeline();
-      const r = renderer(); if (r) r.seek(clipStart(clipId));
+      playing = false; seekTo(clipStart(clipId));
     } else {
-      mode = "scrub"; const r = renderer(); if (r) r.seek(timeAtClientX(e.clientX)); updatePlayhead();
+      mode = "scrub"; playing = false; seekTo(timeAtClientX(e.clientX));
     }
     scroll.setPointerCapture(e.pointerId);
   });
@@ -178,7 +183,7 @@ function initTimelinePointer() {
   scroll.addEventListener("pointermove", (e) => {
     if (!mode) return;
     if (mode === "scrub") {
-      const r = renderer(); if (r) r.seek(timeAtClientX(e.clientX)); updatePlayhead();
+      seekTo(timeAtClientX(e.clientX));
     } else if (mode === "resize") {
       const c = state.demo.clips.find((x) => x.id === clipId);
       c.duration = Math.max(200, Math.round((startDur + ((e.clientX - startX) / PPS) * 1000) / 50) * 50);
@@ -224,16 +229,42 @@ function reorderTo(id, idx) {
 }
 
 // --- playhead / transport ---------------------------------------------------
-function updatePlayhead() {
+// The editor owns the clock and drives the preview via r.seek() every frame — the same
+// path scrubbing uses — so playback and scrubbing behave identically.
+let playing = false;
+let playT = 0; // current playhead time (ms)
+let lastTs = 0;
+
+function seekTo(t) {
+  const total = totalMs();
+  playT = Math.max(0, Math.min(t, total));
   const r = renderer();
-  const t = r ? r.time() : 0;
-  const total = r ? r.duration() : totalMs();
-  $("#playhead").style.left = (t / 1000) * PPS + "px";
-  $("#timecode").textContent = `${(t / 1000).toFixed(1)}s / ${(total / 1000).toFixed(1)}s`;
-  $("#play-pause").textContent = r && r.playing() ? "⏸" : "▶";
-}
-function transportLoop() {
+  if (r) r.seek(playT);
   updatePlayhead();
+}
+function togglePlay() {
+  if (!renderer()) return;
+  if (playing) { playing = false; }
+  else { if (playT >= totalMs()) playT = 0; playing = true; everPlayed = true; lastTs = performance.now(); }
+  updatePlayhead();
+}
+function updatePlayhead() {
+  const total = totalMs();
+  playT = Math.min(playT, total);
+  $("#playhead").style.left = (playT / 1000) * PPS + "px";
+  $("#timecode").textContent = `${(playT / 1000).toFixed(1)}s / ${(total / 1000).toFixed(1)}s`;
+  $("#play-pause").textContent = playing ? "⏸" : "▶";
+}
+function transportLoop(now) {
+  if (playing) {
+    const total = totalMs();
+    playT += now - (lastTs || now);
+    lastTs = now;
+    if (playT >= total) { playT = total; playing = false; }
+    const r = renderer();
+    if (r) r.seek(playT);
+    updatePlayhead();
+  }
   requestAnimationFrame(transportLoop);
 }
 
@@ -345,7 +376,7 @@ async function doExport() {
   const btn = $("#export");
   btn.disabled = true;
   try {
-    setStatus("Rendering… headless Chromium + ffmpeg, this can take a bit.");
+    setStatus("Rendering your video… this can take a moment.");
     const res = await fetch("/api/render", { method: "POST", headers: jsonHeaders, body: JSON.stringify({ demo: state.demo, format: $("#format").value }) });
     if (!res.ok) throw new Error((res.headers.get("content-type") || "").includes("json") ? (await res.json()).error : res.statusText);
     const blob = await res.blob();
@@ -355,6 +386,7 @@ async function doExport() {
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     setStatus("Rendered.", "ok");
+    pet?.react("rendered");
   } catch (e) {
     setStatus("Render failed: " + e.message, "error");
   } finally {
@@ -386,10 +418,10 @@ async function main() {
     $("#theme").textContent = light ? "☾ Dark" : "☀ Light";
   };
   // transport
-  $("#play-pause").onclick = () => { const r = renderer(); if (!r) return; r.playing() ? r.pause() : r.play(); };
-  $("#to-start").onclick = () => { const r = renderer(); if (r) r.seek(0); };
+  $("#play-pause").onclick = togglePlay;
+  $("#to-start").onclick = () => { playing = false; seekTo(0); };
   $("#seed-flow").onclick = async () => {
-    if (!confirm("Rebuild the timeline from the prototype's click-flow? Unsaved edits are replaced.")) return;
+    if (!confirm("Auto-build the timeline from your prototype's screens and links? This replaces the current clips.")) return;
     await loadProject(true, false); markDirty();
   };
   $("#export").onclick = doExport;
@@ -398,7 +430,21 @@ async function main() {
 
   initTimelinePointer();
   window.addEventListener("resize", fitPreview);
-  transportLoop();
+  requestAnimationFrame(transportLoop);
+
+  // Pet handoff: CodeToUI can pass its pet in ?pet=<encoded JSON of the pets array>;
+  // write it to localStorage so the pet "follows" into Motion. Then mount the companion.
+  const petParam = new URLSearchParams(location.search).get("pet");
+  if (petParam) {
+    try { JSON.parse(petParam); localStorage.setItem("codetoui-pet", petParam); } catch { /* ignore bad param */ }
+  }
+  pet = initPet({
+    getContext: () => ({
+      clipCount: state.demo.clips.length,
+      hasTransitions: state.demo.clips.some((c) => c.transitionIn?.type && c.transitionIn.type !== "instant"),
+      everPlayed,
+    }),
+  });
 
   // boot: ?project=<name> handoff from CodeToUI
   try {

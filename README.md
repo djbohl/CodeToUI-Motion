@@ -49,11 +49,16 @@ and remove `disabled`, then add a handler — no IPC/preload needed:
 ```js
 // CodeToUI src/main.js — after the active project is known (activeProject)
 videoBtn.addEventListener("click", () => {
-  window.open("http://localhost:5900/?project=" + encodeURIComponent(activeProject), "_blank");
+  const pet = encodeURIComponent(localStorage.getItem("codetoui-pet") || "");
+  const url = "http://localhost:5900/?project=" + encodeURIComponent(activeProject) +
+    (pet ? "&pet=" + pet : "");
+  window.open(url, "_blank");
 });
 ```
 
-(Run CodeToUI Motion with `C2P_PROJECTS_ROOT` pointed at the same projects folder.)
+Passing `&pet=` lets the pixel pet **follow the user from CodeToUI into Motion** (Motion
+writes it to its own `localStorage` on arrival). Run CodeToUI Motion with
+`C2P_PROJECTS_ROOT` pointed at the same projects folder.
 
 ## CLI
 

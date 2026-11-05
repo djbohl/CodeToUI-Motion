@@ -43,10 +43,12 @@ test("GET /api/projects lists projects + active", async () => {
   assert.equal(json.active, "Demo");
 });
 
-test("GET /api/project returns a seeded demo", async () => {
+test("GET /api/project?fresh=1 returns a freshly seeded demo", async () => {
   const root = await seedRoot();
   const api = createVideoApi({ projectsRoot: root, initialProject: "Demo" });
-  const { json } = await call(api, "GET", "/api/project");
+  // ?fresh=1 forces a seed from the links flow, independent of any saved proto.demo.json
+  // that a real Demo folder might carry.
+  const { json } = await call(api, "GET", "/api/project?fresh=1");
   assert.equal(json.activeProject, "Demo");
   assert.deepEqual(json.screens.sort(), ["Home", "Login"]);
   assert.deepEqual(json.demo.clips.map((c) => c.screen), ["Login", "Home", "Login"]);
